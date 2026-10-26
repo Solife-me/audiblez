@@ -7,7 +7,6 @@ import os
 import traceback
 from glob import glob
 
-import spacy
 import ebooklib
 import soundfile
 import numpy as np
@@ -30,9 +29,7 @@ sample_rate = SAMPLE_RATE
 
 
 def load_spacy():
-    if not spacy.util.is_package("xx_ent_wiki_sm"):
-        print("Downloading Spacy model xx_ent_wiki_sm...")
-        spacy.cli.download("xx_ent_wiki_sm")
+    """Kept for compatibility: sentence splitting now uses spaCy's rule-based sentencizer, which needs no model download."""
 
 
 def set_espeak_library():
@@ -69,7 +66,8 @@ def set_espeak_library():
 
 
 def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.',
-         max_chapters=None, max_sentences=None, selected_chapters=None, post_event=None, engine=None):
+         max_chapters=None, max_sentences=None, selected_chapters=None, post_event=None, engine=None,
+         characters=False, llm=None, review=True, auto_narrator=False):
     if post_event: post_event('CORE_STARTED')
     load_spacy()
     if output_folder != '.':
@@ -90,7 +88,26 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
         else:
             selected_chapters = book.good_chapters
     print_selected_chapters(document_chapters, selected_chapters)
+    if max_chapters:
+        selected_chapters = selected_chapters[:max_chapters]
     texts = [c.extracted_text for c in selected_chapters]
+
+    cast = None
+    if (characters or auto_narrator) and llm is None:
+        raise ValueError('Character voices and --auto-narrator need an LLM: set [llm] in the config or pass --llm-model.')
+    if characters:
+        from audiblez.characters import prepare_cast, print_cast
+        cast, is_new = prepare_cast(selected_chapters, book, engine, voice, llm, output_folder, stem, auto_narrator=auto_narrator)
+        voice = cast.narrator_voice
+        print_cast(cast, engine.list_voices())
+        for v in {c.voice for c in cast.registry.characters.values() if c.voice} | {voice}:
+            engine.check_voice(v)
+        if is_new and review:
+            print(f'\nReview the cast in {cast.cast_path}, then run the same command again to create the audiobook.')
+            return
+    elif auto_narrator:
+        from audiblez.characters import auto_pick_narrator
+        voice = auto_pick_narrator(llm, book, selected_chapters, engine, voice)
 
     has_ffmpeg = shutil.which('ffmpeg') is not None
     if not has_ffmpeg:
@@ -111,9 +128,9 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
     chapter_wav_files = []
     chapter_titles = []
     for i, chapter in enumerate(selected_chapters, start=1):
-        if max_chapters and i > max_chapters: break
         text = chapter.extracted_text
-        chapter_wav_path = Path(output_folder) / f'{stem}_chapter_{i}_{slug(voice)}_{slug(chapter.get_name())}.wav'
+        voice_tag = slug(voice) + (f'_cast{cast.signature()}' if cast else '')
+        chapter_wav_path = Path(output_folder) / f'{stem}_chapter_{i}_{voice_tag}_{slug(chapter.get_name())}.wav'
         if Path(chapter_wav_path).exists():
             print(f'File for chapter {i} already exists. Skipping')
             stats.processed_chars += len(text)
@@ -125,12 +142,13 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
         if len(text.strip()) < 10:
             print(f'Skipping empty chapter {i}')
             continue
-        if i == 1:
-            # add intro text
-            text = f'{title} – {creator}.\n\n' + text
+        intro = f'{title} – {creator}.' if i == 1 else ''  # add intro text
         start_time = time.time()
         if post_event: post_event('CORE_CHAPTER_STARTED', chapter_index=chapter.chapter_index)
-        chunks = chunk_text(text, voice, engine.max_chars)
+        if cast:
+            chunks = chunk_text(intro, voice, engine.max_chars) + cast.chunks(chapter.extracted_text, engine.max_chars)
+        else:
+            chunks = chunk_text(f'{intro}\n\n{text}' if intro else text, voice, engine.max_chars)
         if synthesize_chunks(engine, chunks, speed, chapter_wav_path, stats, post_event=post_event, max_chunks=max_sentences):
             chapter_wav_files.append(chapter_wav_path)
             chapter_titles.append(chapter_title(chapter, i))
@@ -276,7 +294,10 @@ def find_document_chapters_and_extract_texts(book):
         chapter.extracted_text = ''
         html_content_tags = ['title', 'p', 'h1', 'h2', 'h3', 'h4', 'li']
         for text in [c.text.strip() for c in soup.find_all(html_content_tags) if c.text]:
-            if not text.endswith('.'):
+            text = re.sub(r'\s+', ' ', text)  # line breaks inside a paragraph are just source formatting
+            if not text:
+                continue
+            if not re.search(r'[.!?…:;”"’)\]]$', text):
                 text += '.'
             chapter.extracted_text += text + '\n'
         document_chapters.append(chapter)

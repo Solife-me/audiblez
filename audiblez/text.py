@@ -22,9 +22,7 @@ class Chunk:
 @lru_cache(maxsize=1)
 def sentencizer():
     import spacy
-    from audiblez.core import load_spacy
-    load_spacy()
-    nlp = spacy.load('xx_ent_wiki_sm')
+    nlp = spacy.blank('xx')  # multi-language tokenizer; the rule-based sentencizer needs no trained model
     nlp.add_pipe('sentencizer')
     return nlp
 

@@ -20,6 +20,7 @@ class VoiceInfo:
     gender: str = 'unknown'  # male | female | unknown
     accent: str = 'unknown'  # american | british | ...
     age: str = 'adult'
+    style: str = ''  # 'character' for creature/novelty voices that shouldn't be cast as ordinary people
 
 
 class TTSEngine:
@@ -130,7 +131,7 @@ class OpenAICompatibleEngine(TTSEngine):
         if self._voices is None:
             names = self._fetch_voice_names()
             names += [n for n in self.voices_meta if n not in names]
-            self._voices = {n: VoiceInfo(n, **self.voices_meta.get(n, {})) for n in names}
+            self._voices = {n: VoiceInfo(n, **{k: v for k, v in self.voices_meta.get(n, {}).items() if v}) for n in names}
         return self._voices
 
     def _fetch_voice_names(self):
