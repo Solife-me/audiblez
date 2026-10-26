@@ -95,7 +95,8 @@ class CastingTest(unittest.TestCase):
         llm = FakeLLM([{'quotes': {'0': 'Anne', '1': 'Tom'},
                         'characters': [{'name': 'Anne', 'gender': 'female'}, {'name': 'Tom', 'gender': 'male'}]}])
         with tempfile.TemporaryDirectory() as out:
-            cast, is_new = prepare_cast([chapter], book, FakeEngine(), 'narr', llm, out, 'book', log=lambda *a: None)
+            cast, is_new = prepare_cast([chapter], book, FakeEngine(), 'narr', llm, out, 'book', log=lambda *a: None,
+                                        llm_casting=False)
             self.assertTrue(is_new)
             narrator, characters = read_cast_sheet(Path(out) / 'book.cast.toml')
             self.assertEqual(narrator, 'narr')
@@ -106,10 +107,34 @@ class CastingTest(unittest.TestCase):
             # Second run: cached attributions, no LLM calls, and the edited cast sheet is honoured
             sheet = Path(out) / 'book.cast.toml'
             sheet.write_text(sheet.read_text().replace('voice = "m1"', 'voice = "m2"'))
-            cast, is_new = prepare_cast([chapter], book, FakeEngine(), 'narr', llm, out, 'book', log=lambda *a: None)
+            cast, is_new = prepare_cast([chapter], book, FakeEngine(), 'narr', llm, out, 'book', log=lambda *a: None,
+                                        llm_casting=False)
             self.assertFalse(is_new)
             self.assertEqual(llm.calls, 1)
             self.assertEqual(cast.voice_for('Tom'), 'm2')
+
+    def test_llm_casting_is_validated(self):
+        from audiblez.characters import llm_cast
+        chars = [Character('Mrs. Bennet', 'female', lines=30, description='excitable mother'),
+                 Character('Mr. Bennet', 'male', lines=25), Character('Mr. Collins', 'male', lines=12),
+                 Character('Lady Lucas', 'female', lines=1)]
+        llm = FakeLLM([{'cast': {'Mrs. Bennet': {'voice': 'f1', 'why': 'lively'},
+                                 'Mr. Bennet': {'voice': 'f1', 'why': 'wrong gender'},     # rejected: female voice
+                                 'Mr. Collins': {'voice': 'm1'},
+                                 'Lady Lucas': {'voice': 'f1'}}}])                         # minor: may share
+        n = llm_cast(llm, chars, FakeEngine().list_voices(), 'narr', 'fake', log=lambda *a: None)
+        self.assertEqual(n, 3)
+        self.assertEqual([c.voice for c in chars], ['f1', '', 'm1', 'f1'])
+        self.assertEqual(chars[0].why, 'lively')
+        assign_voices(chars, FakeEngine().list_voices(), 'narr', 'fake')  # the fallback fills the rest
+        self.assertEqual(chars[1].voice, 'm2')
+
+    def test_llm_casting_keeps_main_characters_apart(self):
+        from audiblez.characters import llm_cast
+        chars = [Character('A', 'male', lines=30), Character('B', 'male', lines=20)]
+        llm = FakeLLM([{'cast': {'A': {'voice': 'm1'}, 'B': {'voice': 'm1'}}}])
+        llm_cast(llm, chars, FakeEngine().list_voices(), 'narr', 'fake', log=lambda *a: None)
+        self.assertEqual([c.voice for c in chars], ['m1', ''])
 
     def test_bad_llm_answer_falls_back_to_narrator(self):
         spans = paragraph_spans('“Hi,” she said.', 'double')

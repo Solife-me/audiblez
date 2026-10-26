@@ -1,0 +1,43 @@
+# Voice profiles of Ollama's phonon model, measured with `audiblez --profile-voices` on 2026-10-26.
+# gender and age/age_years: audEERING age-gender model; accent: CommonAccent (accent_confidence = share of the
+# 4 clips that agreed); pitch: median Hz; expressiveness: pitch variation in semitones on dialogue lines.
+# style = "character" marks novelty voices (creatures, fairy-tale figures).
+[providers.ollama.voices]
+Alfie = { gender = "male", age = "adult", age_years = 30, accent = "british", accent_confidence = 1.0, pitch = 138, expressiveness = 5.2 }
+Azgorath = { gender = "male", age = "elderly", age_years = 71, accent = "american", accent_confidence = 1.0, pitch = 84, expressiveness = 5.1, style = "character" }
+Bryony = { gender = "female", age = "adult", age_years = 37, accent = "british", accent_confidence = 1.0, pitch = 184, expressiveness = 2.8 }
+"Captain Silas Blackwater" = { gender = "male", age = "adult", age_years = 40, accent = "american", accent_confidence = 1.0, pitch = 101, expressiveness = 5.7 }
+default = { gender = "male", age = "adult", age_years = 33, accent = "british", accent_confidence = 1.0, pitch = 119, expressiveness = 3.7 }
+Delia = { gender = "female", age = "adult", age_years = 34, accent = "american", accent_confidence = 1.0, pitch = 177, expressiveness = 3.8 }
+Easton = { gender = "male", age = "young", age_years = 23, accent = "american", accent_confidence = 1.0, pitch = 134, expressiveness = 3.6 }
+Edwin = { gender = "male", age = "middle-aged", age_years = 58, accent = "british", accent_confidence = 1.0, pitch = 143, expressiveness = 5.3 }
+Elodie-Rose = { gender = "female", age = "adult", age_years = 30, accent = "british", accent_confidence = 0.75, pitch = 194, expressiveness = 3.4 }
+Everly = { gender = "female", age = "adult", age_years = 29, accent = "american", accent_confidence = 1.0, pitch = 172, expressiveness = 2.4 }
+"Fairy Godmother" = { gender = "female", age = "middle-aged", age_years = 58, accent = "american", accent_confidence = 1.0, pitch = 175, expressiveness = 5.6, style = "character" }
+"Fennick the Young Elf" = { gender = "male", age = "young", age_years = 20, accent = "american", accent_confidence = 1.0, pitch = 139, expressiveness = 2.1, style = "character" }
+Freya = { gender = "female", age = "adult", age_years = 32, accent = "british", accent_confidence = 1.0, pitch = 190, expressiveness = 3.0 }
+"Grub the Ogre" = { gender = "male", age = "middle-aged", age_years = 60, accent = "american", accent_confidence = 1.0, pitch = 156, expressiveness = 3.2, style = "character" }
+Hadley = { gender = "female", age = "adult", age_years = 29, accent = "american", accent_confidence = 1.0, pitch = 183, expressiveness = 3.5 }
+Harper = { gender = "female", age = "adult", age_years = 32, accent = "american", accent_confidence = 1.0, pitch = 188, expressiveness = 3.1 }
+Hugh = { gender = "male", age = "middle-aged", age_years = 47, accent = "british", accent_confidence = 1.0, pitch = 142, expressiveness = 4.9 }
+Imogen = { gender = "female", age = "adult", age_years = 33, accent = "british", accent_confidence = 0.75, pitch = 186, expressiveness = 3.2 }
+Juniper = { gender = "female", age = "adult", age_years = 31, accent = "american", accent_confidence = 1.0, pitch = 168, expressiveness = 3.7 }
+Lottie = { gender = "female", age = "adult", age_years = 33, accent = "british", accent_confidence = 1.0, pitch = 216, expressiveness = 4.5 }
+Maeve = { gender = "female", age = "adult", age_years = 40, accent = "british", accent_confidence = 0.75, pitch = 179, expressiveness = 4.1 }
+"Master Aldric" = { gender = "male", age = "middle-aged", age_years = 55, accent = "american", accent_confidence = 1.0, pitch = 137, expressiveness = 3.4 }
+Micah = { gender = "male", age = "adult", age_years = 29, accent = "american", accent_confidence = 1.0, pitch = 119, expressiveness = 4.0 }
+Miles = { gender = "male", age = "adult", age_years = 31, accent = "american", accent_confidence = 1.0, pitch = 129, expressiveness = 3.8 }
+"Morwenna of the Deep" = { gender = "female", age = "elderly", age_years = 63, accent = "american", accent_confidence = 1.0, pitch = 148, expressiveness = 3.7, style = "character" }
+"Old Mortlake" = { gender = "male", age = "middle-aged", age_years = 50, accent = "american", accent_confidence = 0.75, pitch = 86, expressiveness = 2.0 }
+Pippa = { gender = "female", age = "adult", age_years = 35, accent = "american", accent_confidence = 0.75, pitch = 219, expressiveness = 3.1 }
+Preston = { gender = "male", age = "adult", age_years = 37, accent = "american", accent_confidence = 1.0, pitch = 102, expressiveness = 3.9 }
+Russell = { gender = "male", age = "adult", age_years = 28, accent = "american", accent_confidence = 1.0, pitch = 118, expressiveness = 4.1 }
+"Sir Bramwell" = { gender = "male", age = "middle-aged", age_years = 56, accent = "american", accent_confidence = 0.75, pitch = 123, expressiveness = 3.7 }
+Spencer = { gender = "male", age = "adult", age_years = 40, accent = "british", accent_confidence = 1.0, pitch = 124, expressiveness = 4.1 }
+Teddy = { gender = "male", age = "adult", age_years = 44, accent = "british", accent_confidence = 1.0, pitch = 142, expressiveness = 5.6 }
+"The Snow Queen" = { gender = "female", age = "adult", age_years = 46, accent = "american", accent_confidence = 1.0, pitch = 182, expressiveness = 3.0, style = "character" }
+"The Thing Under the Stairs" = { gender = "male", age = "middle-aged", age_years = 53, accent = "american", accent_confidence = 1.0, pitch = 83, expressiveness = 3.2, style = "character" }
+Toby = { gender = "male", age = "adult", age_years = 40, accent = "british", accent_confidence = 1.0, pitch = 140, expressiveness = 4.0 }
+Trevor = { gender = "male", age = "adult", age_years = 42, accent = "american", accent_confidence = 1.0, pitch = 132, expressiveness = 4.3 }
+"Vyrmathrax the Ancient" = { gender = "male", age = "middle-aged", age_years = 56, accent = "american", accent_confidence = 1.0, pitch = 89, expressiveness = 3.7, style = "character" }
+Zoey = { gender = "female", age = "adult", age_years = 30, accent = "american", accent_confidence = 0.75, pitch = 190, expressiveness = 3.0 }

@@ -79,12 +79,36 @@ The result is `OUT/<stem>.m4b`, where `<stem>` is the book's file name without t
 4. **Run it in the background**: a full book takes from minutes (phonon) to hours (Kokoro on CPU). Use a log:
    `mkdir -p OUT && nohup audiblez BOOK -o OUT [options] > OUT/audiblez.log 2>&1 &`
    Report progress from `tail -n 3 OUT/audiblez.log` (it prints `Progress: NN%` and an ETA) when the user asks.
-5. **Character voices take two runs.** The first `--characters` run asks the LLM who speaks each quote, then writes
-   the cast sheet and stops. Show the user the cast table from the log (character, gender, lines, voice). Ask if
-   they want changes, edit the `voice = "..."` lines in `OUT/<stem>.cast.toml`, then run the same command again.
-   If the user asked for it all in one go, add `--no-review`.
+5. **Character voices take two runs.** The first `--characters` run asks the LLM who speaks each quote, has it cast
+   a voice for each character from the voice profiles (the `why` line says why), writes the cast sheet and stops.
+   Review the cast as described in "Casting voices" below, show the user the cast table from the log (character,
+   gender, lines, voice), and fix or change voices by editing the `voice = "..."` lines in `OUT/<stem>.cast.toml`.
+   Then run the same command again. If the user asked for it all in one go, add `--no-review`.
 6. **Deliver** `OUT/<stem>.m4b`. Once the m4b exists, the `OUT/<stem>_chapter_*.wav` files can be deleted to free
    space. Keep them while a run may be resumed: re-running skips chapters whose wav already exists.
+
+## Casting voices
+
+Every voice has a profile: `audiblez --list-voices` shows its gender, apparent age, accent, pitch and
+expressiveness (how much the voice rises and falls; phonon voices range from about 2 to 6, higher is livelier).
+Each character on the cast sheet has a gender, an age group, a `description` of their personality and way of
+speaking, and a line count. When you review or change a cast, apply these rules in order:
+
+1. **Gender** must match.
+2. **Age**: match the character's age group to the voice's age. No phonon voice sounds like a child (the youngest
+   are about 20 to 30), so children and teenagers get the youngest voices; elderly characters get the oldest
+   (Edwin, Master Aldric, Sir Bramwell, Old Mortlake for men).
+3. **Distinct main voices**: the characters with the most lines each get a voice nobody else uses, and two
+   characters who talk to each other never share one. Minor characters (a few lines) may share voices.
+4. **Temperament**: excitable, emotional, comic or lively characters get the most expressive voices; calm, dry,
+   stern or reserved characters get steadier ones. Deep voices (low pitch) suit authority, gravity or menace.
+5. **Accent**: everyone shares the accent of the book's setting (the narrator's accent is a good guide), except
+   characters described as foreign. For a British book, use the British voices; for an American one, the American.
+6. **Never** cast the narrator's voice, and use `style = "character"` voices (Azgorath, Grub the Ogre, Fairy
+   Godmother, The Snow Queen, ...) only for creatures and fairy-tale figures of that kind.
+
+If the user dislikes a voice, pick the next best voice by the same rules rather than any voice they haven't heard.
+Changing voices on the cast sheet never re-runs speaker detection; only the audio is regenerated.
 
 ## Pitfalls
 
@@ -98,9 +122,11 @@ The result is `OUT/<stem>.m4b`, where `<stem>` is the book's file name without t
 - **Wrong chapters picked**: the log prints a table of all sections with ✅ on the selected ones. PDFs use their
   bookmarks, or larger-font headings when there are none. Front matter (cover, contents) is skipped. Long
   sections are split into "(part N)" pieces between paragraphs.
-- **Character voices need a tagged voice list.** Ollama doesn't report gender or accent. Without tags, all characters
-  are read by the narrator. `audiblez --audition-voices` prints a snippet with pitch-based gender guesses to add to
-  the config under `[providers.ollama.voices]`. Accents must be filled in by someone listening.
+- **Character voices need voice profiles.** Ollama doesn't report gender, age or accent. The install script adds
+  the measured phonon profiles from `references/phonon-voices.toml` to the config. For another TTS model, run
+  `audiblez --profile-voices --update-config` after adding the profiling models to the install:
+  `uv tool install --force --python 3.12 --torch-backend cpu --with faster-whisper --with speechbrain --with torchaudio
+  git+https://github.com/Solife-me/audiblez` (about 1.5 GB of models are downloaded on first use). Without profiles, all characters are read by the narrator.
 - **Re-casting**: editing the cast sheet automatically re-synthesizes the affected book (the wav names include a
   hash of the cast). To re-detect the characters, delete `OUT/<stem>.cast.toml` and `OUT/<stem>.speakers.json`.
 - **Cloud LLM models** (`*:cloud`) use the user's Ollama cloud quota. Use them only when the user asks, or after

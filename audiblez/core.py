@@ -68,7 +68,8 @@ def set_espeak_library():
 
 def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.',
          max_chapters=None, max_sentences=None, selected_chapters=None, post_event=None, engine=None,
-         characters=False, llm=None, review=True, auto_narrator=False, prime_replies=False, verifier=None):
+         characters=False, llm=None, review=True, auto_narrator=False, prime_replies=False, verifier=None,
+         llm_casting=True):
     if post_event: post_event('CORE_STARTED')
     load_spacy()
     if output_folder != '.':
@@ -98,7 +99,8 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
         raise ValueError('Character voices and --auto-narrator need an LLM: set [llm] in the config or pass --llm-model.')
     if characters:
         from audiblez.characters import prepare_cast, print_cast
-        cast, is_new = prepare_cast(selected_chapters, book, engine, voice, llm, output_folder, stem, auto_narrator=auto_narrator)
+        cast, is_new = prepare_cast(selected_chapters, book, engine, voice, llm, output_folder, stem, auto_narrator=auto_narrator,
+                                    llm_casting=llm_casting)
         voice = cast.narrator_voice
         print_cast(cast, engine.list_voices())
         for v in {c.voice for c in cast.registry.characters.values() if c.voice} | {voice}:

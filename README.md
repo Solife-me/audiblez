@@ -137,8 +137,30 @@ and roughly doubles synthesis time; `--no-verify` or `verify = false` under `[tt
 gender and accent, e.g. a British male voice for a Charles Spurgeon sermon. It only switches voice when the
 LLM is confident and a matching voice is tagged. `-v` always wins.
 
-Casting needs voices tagged with a gender: Kokoro's are tagged automatically (`bm_george` is a British man).
-For other providers, tag them in the config as shown above. Untagged voices are never cast.
+### Voice profiles and casting
+
+Casting needs to know what each voice sounds like. Kokoro's voices are tagged from their names (`bm_george` is a
+British man). For other providers, `audiblez --profile-voices` measures every voice and prints a config table;
+add `--update-config` to write it straight into your config:
+
+```bash
+pip install "audiblez[profile]"
+audiblez --profile-voices --update-config
+audiblez --list-voices       # gender, age, accent, pitch and expressiveness of every voice
+```
+
+It renders a few sentences per voice and measures gender and apparent age with audEERING's
+[age/gender model](https://huggingface.co/audeering/wav2vec2-large-robust-24-ft-age-gender) (licensed for
+non-commercial use), accent with [CommonAccent](https://huggingface.co/Jzuluaga/accent-id-commonaccent_ecapa), and
+pitch and expressiveness (pitch variation on dialogue lines) directly. Mark creature/novelty voices with
+`style = "character"` so they're only cast as creatures.
+
+With an LLM configured, the LLM casts the characters: it gets every voice's profile plus each character's
+gender, age, line count and a short description of their personality from speaker detection, and follows explicit
+rules (match gender and age, distinct voices for main characters, lively voices for excitable characters, the
+setting's accent, no novelty voices for ordinary people). Its choices are checked (gender, a main character never
+shares a voice) and the reason for each is written on the cast sheet. `llm_casting = false` under `[characters]`
+uses the built-in rules instead. Untagged voices are never cast.
 
 ## Hermes agent skill
 
@@ -230,7 +252,8 @@ For all the options available, you can check the help page `audiblez --help`:
 ```
 usage: audiblez [-h] [-v VOICE] [-p] [-s SPEED] [-c] [-o FOLDER] [--no-verify] [--max-chapters N]
                 [--provider PROVIDER] [--model MODEL] [--base-url URL] [--list-voices]
-                [--config FILE] [--init-config] [--audition-voices] [--characters] [--no-review]
+                [--config FILE] [--init-config] [--profile-voices] [--update-config]
+                [--audition-voices] [--characters] [--no-review]
                 [--prime-replies | --no-prime-replies] [--auto-narrator]
                 [--llm-provider LLM_PROVIDER] [--llm-model LLM_MODEL]
                 [file_path]
@@ -262,6 +285,11 @@ TTS provider:
   --list-voices         List the voices of the selected provider and exit
   --config FILE         Config file (default: ~/.config/audiblez/config.toml)
   --init-config         Write a starter config file and exit
+  --profile-voices      Measure every voice's gender, age, accent, pitch and expressiveness (needs
+                        "audiblez[profile]") and print a config snippet; with --update-config,
+                        write it into the config
+  --update-config       With --profile-voices: replace the provider's voices table in the config
+                        with the measured profiles
   --audition-voices     Render a sample of every voice into one m4b, print a config snippet, and
                         exit
 

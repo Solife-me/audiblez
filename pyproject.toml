@@ -49,6 +49,11 @@ gui = [
 verify = [
     "faster-whisper (>=1.2.1,<2.0.0)",
 ]
+profile = [
+    "speechbrain (>=1.1.2,<2.0.0)",
+    "torchaudio (>=2.6.0)",
+    "transformers (>=4.48.0)",
+]
 
 [project.scripts]
 audiblez = "audiblez.cli:cli_main"

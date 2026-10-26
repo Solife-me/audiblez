@@ -19,9 +19,17 @@ class VoiceInfo:
     name: str
     gender: str = 'unknown'  # male | female | unknown
     accent: str = 'unknown'  # american | british | ...
-    age: str = 'adult'
+    age: str = 'adult'  # child | young | adult | middle-aged | elderly
     style: str = ''  # 'character' for creature/novelty voices that shouldn't be cast as ordinary people
-    expressiveness: float = 0.0  # pitch variation in semitones (from --audition-voices); livelier voices go to main characters
+    expressiveness: float = 0.0  # pitch variation in semitones (from --profile-voices); livelier voices go to main characters
+    age_years: float = 0.0  # apparent age measured by --profile-voices
+    accent_confidence: float = 1.0  # share of the profiling clips the accent model agreed on
+    pitch: float = 0.0  # median pitch in Hz
+
+    @classmethod
+    def from_config(cls, name, meta):
+        fields = cls.__dataclass_fields__
+        return cls(name, **{k: v for k, v in (meta or {}).items() if k in fields and k != 'name' and v not in ('', None)})
 
 
 class TTSEngine:
@@ -132,7 +140,7 @@ class OpenAICompatibleEngine(TTSEngine):
         if self._voices is None:
             names = self._fetch_voice_names()
             names += [n for n in self.voices_meta if n not in names]
-            self._voices = {n: VoiceInfo(n, **{k: v for k, v in self.voices_meta.get(n, {}).items() if v}) for n in names}
+            self._voices = {n: VoiceInfo.from_config(n, self.voices_meta.get(n)) for n in names}
         return self._voices
 
     def _fetch_voice_names(self):

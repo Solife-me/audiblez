@@ -34,6 +34,8 @@ def cli_main():
     tts.add_argument('--list-voices', action='store_true', help='List the voices of the selected provider and exit')
     tts.add_argument('--config', default=None, metavar='FILE', help='Config file (default: ~/.config/audiblez/config.toml)')
     tts.add_argument('--init-config', action='store_true', help='Write a starter config file and exit')
+    tts.add_argument('--profile-voices', action='store_true', help='Measure every voice\'s gender, age, accent, pitch and expressiveness (needs "audiblez[profile]") and print a config snippet; with --update-config, write it into the config')
+    tts.add_argument('--update-config', action='store_true', help='With --profile-voices: replace the provider\'s voices table in the config with the measured profiles')
     tts.add_argument('--audition-voices', action='store_true', help='Render a sample of every voice into one m4b, print a config snippet, and exit')
 
     cast = parser.add_argument_group('character voices (needs an LLM, see [llm] in the config)')
@@ -63,6 +65,16 @@ def cli_main():
 
     if args.list_voices:
         print_voices(engine)
+        return
+    if args.profile_voices:
+        from audiblez.profile import profile_voices, voices_section, update_config
+        from audiblez.config import config_path
+        profiles = profile_voices(engine, cache_dir=config_path(args.config).parent)
+        if args.update_config:
+            update_config(config_path(args.config), engine.name, profiles)
+            print(f'Updated [providers.{engine.name}.voices] in {config_path(args.config)}')
+        else:
+            print('\n' + voices_section(engine.name, profiles))
         return
     if args.audition_voices:
         from audiblez.audition import audition
@@ -100,16 +112,18 @@ def cli_main():
     main(args.file_path, voice, args.pick, speed, args.output, max_chapters=args.max_chapters, engine=engine,
          characters=args.characters, llm=llm, review=not args.no_review, auto_narrator=args.auto_narrator and args.voice is None,
          prime_replies=args.prime_replies if args.prime_replies is not None else bool(cfg['characters'].get('prime_replies')),
-         verifier=verifier)
+         verifier=verifier, llm_casting=bool(cfg['characters'].get('llm_casting', True)))
 
 
 def print_voices(engine):
     from tabulate import tabulate
-    rows = [[v.name, v.gender, v.accent] for v in engine.list_voices().values()]
+    rows = [[v.name, v.gender, f'{v.age} (~{v.age_years:.0f})' if v.age_years else v.age,
+             v.accent + ('?' if v.accent_confidence < 0.75 else ''), v.pitch or '', v.expressiveness or '', v.style]
+            for v in engine.list_voices().values()]
     if not rows:
         print(f'{engine.name} did not report its voices. Add them to the config under [providers.{engine.name}.voices].')
         return
-    print(tabulate(rows, headers=['Voice', 'Gender', 'Accent']))
+    print(tabulate(rows, headers=['Voice', 'Gender', 'Age', 'Accent', 'Pitch (Hz)', 'Expressiveness', 'Style']))
 
 
 if __name__ == '__main__':

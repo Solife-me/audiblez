@@ -90,6 +90,10 @@ def paragraph_spans(text, style):
 # ---------------------------------------------------------------------------------------------------------------
 # Characters
 
+AGES = ('child', 'young', 'adult', 'middle-aged', 'elderly')
+AGE_YEARS = {'child': 10, 'young': 20, 'adult': 35, 'middle-aged': 52, 'elderly': 70}
+
+
 @dataclass
 class Character:
     name: str
@@ -98,6 +102,8 @@ class Character:
     aliases: set = field(default_factory=set)
     lines: int = 0
     voice: str = ''
+    description: str = ''  # personality and way of speaking, from the LLM
+    why: str = ''  # why this voice was chosen
 
 
 def name_tokens(name):
@@ -153,7 +159,7 @@ class Registry:
         character.name = new_name
         self.characters[new_name] = character
 
-    def add(self, name, gender='unknown', age='adult', aliases=()):
+    def add(self, name, gender='unknown', age='adult', aliases=(), description=''):
         name = name.strip()
         existing = self.resolve(name)
         if existing and existing not in (NARRATOR, UNKNOWN):
@@ -164,8 +170,10 @@ class Registry:
             c.gender = gender
         if c.gender == 'unknown':
             c.gender = title_gender(name) or 'unknown'
-        if age in ('child', 'elderly'):
+        if age in AGES and age != 'adult':
             c.age = age
+        if description and not c.description:
+            c.description = str(description).strip()[:120]
         for alias in (a.strip() for a in aliases if a and a.strip()):
             if alias.lower() == c.name.lower():
                 continue
@@ -196,11 +204,14 @@ Rules:
 - Speakers usually alternate paragraph by paragraph in a conversation, and quotes in the same paragraph are
   usually the same speaker. Use the previous context, where speakers are already labeled like [Name]“...”.
 - List every speaker you name who is not in the known-character list under "characters", with gender
-  ("male", "female" or "unknown", from names, pronouns and titles), age ("child", "adult" or "elderly") and
-  any other names the passage uses for them.
+  ("male", "female" or "unknown", from names, pronouns and titles), age ("child", "young", "adult",
+  "middle-aged" or "elderly", from what the text implies), a short description of their personality and way of
+  speaking (e.g. "excitable, talkative mother" or "dry, sarcastic old gentleman"), and any other names the passage
+  uses for them.
 
 Reply with JSON only, in this shape:
-{"quotes": {"12": "Name", "13": "narrator"}, "characters": [{"name": "Name", "gender": "female", "age": "adult", "aliases": []}]}'''
+{"quotes": {"12": "Name", "13": "narrator"}, "characters": [{"name": "Name", "gender": "female", "age": "adult",
+ "description": "excitable, talkative mother", "aliases": []}]}'''
 
 
 def render_paragraph(spans, quote_ids=None, speakers=None):
@@ -256,7 +267,8 @@ def attribute_chapter(llm, spans_by_paragraph, registry, log=print):
             continue
         for c in answer.get('characters') or []:
             if isinstance(c, dict) and c.get('name') and c['name'].strip().lower() not in (NARRATOR, UNKNOWN):
-                registry.add(c['name'], c.get('gender', 'unknown'), c.get('age', 'adult'), c.get('aliases') or [])
+                registry.add(c['name'], c.get('gender', 'unknown'), c.get('age', 'adult'), c.get('aliases') or [],
+                             c.get('description', ''))
         quotes = answer.get('quotes') or {}
         for q in ids:
             name = str(quotes.get(str(q)) or quotes.get(f'Q{q}') or UNKNOWN).strip()
@@ -332,25 +344,106 @@ def eligible_voices(voices, narrator_voice, engine_name):
 
 def assign_voices(characters, voices, narrator_voice, engine_name, accent=None):
     """Gives each character (most lines first) the least used voice of their gender, preferring the book's accent,
-    a matching age and then the most expressive voice, so the characters who talk most get the liveliest voices.
-    Characters of unknown gender keep the narrator's voice."""
+    the closest age and then the most expressive voice, so the characters who talk most get the liveliest voices.
+    Characters of unknown gender keep the narrator's voice. Characters that already have a voice keep it."""
     pool = eligible_voices(voices, narrator_voice, engine_name)
-    used = Counter()
+    used = Counter(c.voice for c in characters if c.voice)
     for c in sorted(characters, key=lambda c: -c.lines):
         if c.voice:
-            used[c.voice] += 1
             continue
         candidates = [v for v in pool if v.gender == c.gender]
         if c.gender not in ('male', 'female') or not candidates:
             c.voice = narrator_voice
             continue
         def score(v):
-            age_match = (getattr(v, 'age', 'adult') == c.age) or (c.age == 'child' and getattr(v, 'age', '') == 'young')
-            return (used[v.name], 0 if accent and v.accent == accent else 1, 0 if age_match else 1,
-                    -getattr(v, 'expressiveness', 0.0))
+            if getattr(v, 'age_years', 0):
+                age_gap = round(abs(v.age_years - AGE_YEARS.get(c.age, 35)) / 12)
+            else:
+                age_gap = 0 if getattr(v, 'age', 'adult') == c.age or (c.age == 'child' and v.age == 'young') else 1
+            return (used[v.name], 0 if accent and v.accent == accent else 1, age_gap, -getattr(v, 'expressiveness', 0.0))
         best = min(candidates, key=score)
         c.voice = best.name
         used[best.name] += 1
+
+
+CASTING_PROMPT = """You are casting voices for a multi-voice audiobook. Assign one voice to every character under
+"Characters to cast", choosing from "Voices".
+
+Rules, most important first:
+1. Gender: a character must get a voice of the same gender.
+2. Age: match the character's age to the voice's apparent age (age_years). Children and teenagers get the youngest
+   voices; elderly characters get the oldest. Never give a young character an old voice or the other way round.
+3. Distinct voices: the characters with the most lines must each get a voice that no other character uses, and
+   characters who talk to each other should never share a voice. Only minor characters (a handful of lines) may
+   share a voice, and never with a main character. Characters under "Already cast" keep their voices: count them.
+4. Temperament: lively, emotional, excitable or comic characters get the most expressive voices (high
+   expressiveness); calm, dry, stern or reserved characters get steadier voices (lower expressiveness). Deep voices
+   (low pitch) suit authority, gravity or menace; lighter voices suit youth and warmth.
+5. Accent: characters usually share the accent of the book's setting, and the narrator's accent is a good guide.
+   Give a different accent only to characters the description marks as foreign or from elsewhere.
+6. Never use the narrator's voice. Voices with style "character" are novelty voices for creatures and fairy-tale
+   figures: use one only for a character of that kind (a dragon, an ogre, a fairy, a monster).
+
+Reply with JSON only: {"cast": {"Character name": {"voice": "Voice name", "why": "a few words"}}}"""
+
+
+def voice_profile(v):
+    profile = {'name': v.name, 'gender': v.gender, 'age': v.age, 'accent': v.accent}
+    for key in ('age_years', 'pitch', 'expressiveness'):
+        if getattr(v, key, 0):
+            profile[key] = getattr(v, key)
+    if getattr(v, 'style', ''):
+        profile['style'] = v.style
+    return profile
+
+
+def llm_cast(llm, characters, voices, narrator_voice, engine_name, book=None, log=print):
+    """Lets the LLM cast the characters without a voice, using the voice profiles and character descriptions.
+    Returns how many were cast; anything invalid is left for assign_voices."""
+    todo = [c for c in sorted(characters, key=lambda c: -c.lines) if not c.voice and c.gender in ('male', 'female')]
+    if not todo:
+        return 0
+    pool = [v for v in voices.values() if v.name != narrator_voice]
+    if engine_name == 'kokoro':
+        group = 'ab' if narrator_voice[0] in 'ab' else narrator_voice[0]
+        pool = [v for v in pool if v.name[0] in group]
+    describe = lambda c: {'name': c.name, 'gender': c.gender, 'age': c.age, 'lines': c.lines,
+                          **({'description': c.description} if c.description else {})}
+    narrator = voices.get(narrator_voice)
+    user = '\n\n'.join([
+        f'Book: {getattr(book, "title", "") or "unknown"} by {getattr(book, "creator", "") or "unknown"}',
+        f'Narrator voice: {json.dumps(voice_profile(narrator) if narrator else {"name": narrator_voice})}',
+        f'Already cast: {json.dumps([{**describe(c), "voice": c.voice} for c in characters if c.voice], ensure_ascii=False)}',
+        f'Characters to cast: {json.dumps([describe(c) for c in todo], ensure_ascii=False)}',
+        f'Voices: {json.dumps([voice_profile(v) for v in pool], ensure_ascii=False)}'])
+    try:
+        answer = llm.chat_json(CASTING_PROMPT, user).get('cast') or {}
+    except Exception as e:
+        log(f'LLM casting failed ({e}); casting by voice profile instead.')
+        return 0
+    by_name = {v.name: v for v in pool}
+    cast = 0
+    for c in todo:
+        choice = answer.get(c.name) or next((a for n, a in answer.items() if n.lower() == c.name.lower()), None)
+        voice = choice.get('voice') if isinstance(choice, dict) else choice
+        v = by_name.get(voice)
+        if v is None or (v.gender in ('male', 'female') and v.gender != c.gender):
+            if voice:
+                log(f'  Ignoring the LLM\'s choice of "{voice}" for {c.name} (not a {c.gender} voice).')
+            continue
+        c.voice = v.name
+        c.why = str(choice.get('why', '')).strip()[:100] if isinstance(choice, dict) else ''
+        cast += 1
+    # Rule 3 is the one models break most: a main character must not share a voice with a character who has more lines
+    seen = {}
+    for c in sorted(characters, key=lambda c: -c.lines):
+        if c.voice and c.voice in seen and c.lines >= 5 and c in todo:
+            log(f'  {c.name} would share {c.voice} with {seen[c.voice]}; picking another voice.')
+            c.voice, c.why = '', ''
+            cast -= 1
+        elif c.voice:
+            seen.setdefault(c.voice, c.name)
+    return cast
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -360,18 +453,25 @@ def toml_str(s):
     return json.dumps(str(s), ensure_ascii=False)
 
 
-def write_cast_sheet(path, title, creator, narrator_voice, characters, narrator_note=''):
+def write_cast_sheet(path, title, creator, narrator_voice, characters, narrator_note='', voices=None):
     lines = [f'# audiblez cast sheet for {title or "this book"}{f" by {creator}" if creator else ""}',
-             '# Change any voice (see `audiblez --list-voices`), then run the same command again to make the audiobook.',
+             '# Change any voice (see `audiblez --list-voices` for each voice\'s gender, age, accent and expressiveness),',
+             '# then run the same command again to make the audiobook.',
              '# Set a character\'s voice to the narrator\'s voice to have the narrator read their lines.',
              '# Delete this file and the .speakers.json next to it to detect the characters again.', '']
     if narrator_note:
         lines += [f'# {narrator_note}']
     lines += [f'narrator = {toml_str(narrator_voice)}', '']
     for c in sorted(characters, key=lambda c: -c.lines):
-        lines += [f'[characters.{toml_str(c.name)}]', f'voice = {toml_str(c.voice)}', f'gender = {toml_str(c.gender)}']
+        v = (voices or {}).get(c.voice)
+        profile = f'  # {v.gender}, {v.age}, {v.accent}, expressiveness {v.expressiveness}' if v and v.expressiveness else ''
+        lines += [f'[characters.{toml_str(c.name)}]', f'voice = {toml_str(c.voice)}{profile}', f'gender = {toml_str(c.gender)}']
         if c.age != 'adult':
             lines.append(f'age = {toml_str(c.age)}')
+        if c.description:
+            lines.append(f'description = {toml_str(c.description)}')
+        if c.why:
+            lines.append(f'why = {toml_str(c.why)}')
         lines.append(f'lines = {c.lines}')
         if c.aliases:
             lines.append(f'aliases = [{", ".join(toml_str(a) for a in sorted(c.aliases))}]')
@@ -383,7 +483,7 @@ def read_cast_sheet(path):
     with open(path, 'rb') as f:
         data = tomllib.load(f)
     characters = [Character(name, c.get('gender', 'unknown'), c.get('age', 'adult'), set(c.get('aliases', [])),
-                            c.get('lines', 0), c.get('voice', ''))
+                            c.get('lines', 0), c.get('voice', ''), c.get('description', ''), c.get('why', ''))
                   for name, c in data.get('characters', {}).items()]
     return data.get('narrator'), characters
 
@@ -502,7 +602,8 @@ def last_sentence(text, max_chars=120):
     return last if last.endswith(('.', '!', '?', '…')) else last + '.'
 
 
-def prepare_cast(chapters, book, engine, narrator_voice, llm, output_folder, stem, auto_narrator=False, log=print):
+def prepare_cast(chapters, book, engine, narrator_voice, llm, output_folder, stem, auto_narrator=False, log=print,
+                 llm_casting=True):
     """Loads or builds the cast for the given chapters. Returns (cast, is_new): is_new means the cast sheet was just
     written and should be reviewed before synthesis."""
     cast_path = Path(output_folder) / f'{stem}.cast.toml'
@@ -514,7 +615,8 @@ def prepare_cast(chapters, book, engine, narrator_voice, llm, output_folder, ste
 
     is_new = not cast_path.exists()
     narrator_note = ''
-    cached_characters = [Character(c['name'], c.get('gender', 'unknown'), c.get('age', 'adult'), set(c.get('aliases', [])))
+    cached_characters = [Character(c['name'], c.get('gender', 'unknown'), c.get('age', 'adult'), set(c.get('aliases', [])),
+                                   description=c.get('description', ''))
                          for c in cache.get('characters', [])]
     if is_new:
         registry = Registry(cached_characters)
@@ -526,7 +628,7 @@ def prepare_cast(chapters, book, engine, narrator_voice, llm, output_folder, ste
         registry = Registry(characters)
         for c in cached_characters:  # detected after the cast sheet was written
             if registry.resolve(c.name) in (None, NARRATOR, UNKNOWN):
-                registry.add(c.name, c.gender, c.age, c.aliases)
+                registry.add(c.name, c.gender, c.age, c.aliases, c.description)
         log(f'Using cast sheet {cast_path}')
 
     todo = [c for c in chapters if text_key(c.extracted_text) not in speakers_by_chapter]
@@ -537,7 +639,7 @@ def prepare_cast(chapters, book, engine, narrator_voice, llm, output_folder, ste
             continue
         log(f'Detecting speakers in "{chapter.get_name()}" ({i}/{len(todo)})...')
         speakers_by_chapter[text_key(chapter.extracted_text)] = attribute_chapter(llm, spans, registry, log)
-        characters = [{'name': c.name, 'gender': c.gender, 'age': c.age, 'aliases': sorted(c.aliases)}
+        characters = [{'name': c.name, 'gender': c.gender, 'age': c.age, 'description': c.description, 'aliases': sorted(c.aliases)}
                       for c in registry.characters.values()]
         cache_path.write_text(json.dumps({'quote_style': style, 'model': llm.model, 'characters': characters,
                                           'chapters': speakers_by_chapter}, ensure_ascii=False, indent=1), encoding='utf-8')
@@ -555,12 +657,15 @@ def prepare_cast(chapters, book, engine, narrator_voice, llm, output_folder, ste
     speaking = [c for c in registry.characters.values() if c.lines > 0 or c.voice]  # merely mentioned: no voice yet
     new_characters = [c for c in speaking if not c.voice]
     if new_characters:
+        if llm is not None and llm_casting:
+            log(f'Casting {len(new_characters)} characters with {llm.model}...')
+            llm_cast(llm, speaking, voices, narrator_voice, engine.name, book, log)
         accent = voices[narrator_voice].accent if narrator_voice in voices else None
         assign_voices(speaking, voices, narrator_voice, engine.name, accent if accent != 'unknown' else None)
         if not is_new:
             log(f'Added {len(new_characters)} new characters to the cast sheet: {", ".join(c.name for c in new_characters)}')
     if is_new or new_characters:
-        write_cast_sheet(cast_path, book.title, book.creator, narrator_voice, speaking, narrator_note)
+        write_cast_sheet(cast_path, book.title, book.creator, narrator_voice, speaking, narrator_note, voices)
     return Cast(cast_path, cache_path, narrator_voice, registry, style, speakers_by_chapter), is_new
 
 
