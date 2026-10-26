@@ -403,6 +403,22 @@ def strip_footnotes(soup):
                 parent.decompose()
 
 
+CONTENT_TAGS = ['title', 'p', 'h1', 'h2', 'h3', 'h4', 'li']
+
+
+def own_text(element):
+    """The element's text, minus the text of nested content elements (a <p> inside an <li>), which are read on their
+    own. Otherwise every paragraph wrapped in a list item is read twice in a row."""
+    if not element.find(CONTENT_TAGS):
+        return element.get_text().strip()
+    parts = []
+    for string in element.find_all(string=True):
+        owner = next((parent for parent in string.parents if parent.name in CONTENT_TAGS), None)
+        if owner is element:
+            parts.append(string)
+    return ''.join(parts).strip()
+
+
 def find_document_chapters_and_extract_texts(book, skip_footnotes=True):
     """Returns every chapter that is an ITEM_DOCUMENT and enriches each chapter with extracted_text."""
     document_chapters = []
@@ -414,8 +430,7 @@ def find_document_chapters_and_extract_texts(book, skip_footnotes=True):
         if skip_footnotes:
             strip_footnotes(soup)
         chapter.extracted_text = ''
-        html_content_tags = ['title', 'p', 'h1', 'h2', 'h3', 'h4', 'li']
-        for text in [c.text.strip() for c in soup.find_all(html_content_tags) if c.text]:
+        for text in [own_text(c) for c in soup.find_all(CONTENT_TAGS)]:
             text = re.sub(r'\s+', ' ', text)  # line breaks inside a paragraph are just source formatting
             text = re.sub(r'\s*\[\s*\]|\(\s*\)', '', text).strip()  # brackets left around removed note markers
             if not text:
@@ -447,11 +462,15 @@ def chapter_beginning_one_liner(c, chars=20):
     return s + '…' if len(s) > 0 else ''
 
 
+NAVIGATION_DOCUMENT = re.compile(r'(^|/)(toc|nav|contents?|titlepage|cover)\.x?html?$', re.I)
+
+
 def find_good_chapters(document_chapters):
     chapters = [c for c in document_chapters if c.get_type() == ebooklib.ITEM_DOCUMENT and is_chapter(c)]
     if len(chapters) == 0:
         print('Not easy to recognize the chapters, defaulting to all non-empty documents.')
-        chapters = [c for c in document_chapters if c.get_type() == ebooklib.ITEM_DOCUMENT and len(c.extracted_text) > 10]
+        chapters = [c for c in document_chapters if c.get_type() == ebooklib.ITEM_DOCUMENT and len(c.extracted_text) > 10
+                    and not NAVIGATION_DOCUMENT.search(c.get_name())]
     return chapters
 
 
