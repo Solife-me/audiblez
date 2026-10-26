@@ -27,6 +27,7 @@ def cli_main():
     parser.add_argument('--no-verify', action='store_true', help='Skip checking each clip with speech recognition (used when faster-whisper is installed: pip install "audiblez[verify]")')
     parser.add_argument('--skip-footnotes', action=argparse.BooleanOptionalAction, default=None, help='Don\'t read footnotes, endnotes and their reference markers (default: on; [text] skip_footnotes in the config)')
     parser.add_argument('--roman-numerals', action=argparse.BooleanOptionalAction, default=None, help='Read Roman numerals as numbers where context makes them certain: CHAPTER XII, "II. Secondly", Charles II, chap. lxiii (default: on; [text] roman_numerals in the config)')
+    parser.add_argument('--foreign-scripts', choices=['transliterate', 'skip', 'read'], default=None, help='Greek and Hebrew quotations, which no TTS voice can read: transliterate them into English letters ("tremontas kai phoboumenous"), skip them, or read them as written (default: transliterate; [text] foreign_scripts in the config)')
     parser.add_argument('--max-chapters', type=int, default=None, metavar='N', help='Only read the first N selected chapters (handy for a quick test)')
 
     tts = parser.add_argument_group('TTS provider')
@@ -116,7 +117,8 @@ def cli_main():
          prime_replies=args.prime_replies if args.prime_replies is not None else bool(cfg['characters'].get('prime_replies')),
          verifier=verifier, llm_casting=bool(cfg['characters'].get('llm_casting', True)),
          skip_footnotes=args.skip_footnotes if args.skip_footnotes is not None else bool(cfg['text'].get('skip_footnotes', True)),
-         roman_numerals=args.roman_numerals if args.roman_numerals is not None else bool(cfg['text'].get('roman_numerals', True)))
+         roman_numerals=args.roman_numerals if args.roman_numerals is not None else bool(cfg['text'].get('roman_numerals', True)),
+         foreign_scripts=args.foreign_scripts or cfg['text'].get('foreign_scripts', 'transliterate'))
 
 
 def print_voices(engine):

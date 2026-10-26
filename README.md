@@ -126,7 +126,7 @@ and prints it as `expressiveness` for the config.
 Before speech, abbreviations that TTS models misread are spelled out (Mr., Mrs., Dr., St., &c.), old spellings
 are modernized (to-morrow, to-day), and page numbers of the printed edition (`{xii}` in Gutenberg texts) are dropped.
 
-Two more clean-ups are on by default and can be turned off in the `[text]` section of the config, or for one book
+Three more clean-ups are on by default and can be changed in the `[text]` section of the config, or for one book
 on the command line, if they don't suit it:
 
 - **Footnotes are skipped** (`--no-skip-footnotes` to read them): footnote and endnote bodies and the reference
@@ -136,7 +136,13 @@ on the command line, if they don't suit it:
   numerals are converted where the context makes them certain: after headings ("CHAPTER XII", "Book IV", "Scene
   ii"), as section numbers at the start of a paragraph ("II. Secondly…"), after monarchs' names ("Charles II" as
   "Charles the Second"), in lists, and in citations ("Isaiah, chap. lxiii, v. 10" as "chapter 63, verse 10";
-  "1 Cor. xii. 12" as "First Corinthians 12:12"). The pronoun I and words like MIX or CIVIL are left alone. Every clip is trimmed
+  "1 Cor. xii. 12" as "First Corinthians 12:12"). The pronoun I and words like MIX or CIVIL are left alone.
+- **Greek and Hebrew are transliterated** (`--foreign-scripts skip` or `read`): no TTS voice can read them (phonon
+  spells Greek out letter by letter and turns Hebrew into gibberish), so quotations like "τρέμοντας καὶ
+  φοβουμένους" are read as an English reader would say them, "tremontas kai phoboumenous", and pointed Hebrew
+  likewise ("בְּרֵאשִׁית" as "beresheet", the divine name as "Jehovah"). `skip` leaves them out, which works well
+  when the author glosses them anyway. Switching to a native voice isn't possible: phonon's multilingual model
+  speaks only English, French, German, Spanish and Portuguese. Every clip is trimmed
 of the silence models pad it with, levelled to the same loudness, and regenerated if it has a long silence in the
 middle or a length that doesn't fit its text.
 
@@ -267,9 +273,10 @@ For all the options available, you can check the help page `audiblez --help`:
 ```
 usage: audiblez [-h] [-v VOICE] [-p] [-s SPEED] [-c] [-o FOLDER] [--no-verify]
                 [--skip-footnotes | --no-skip-footnotes] [--roman-numerals | --no-roman-numerals]
-                [--max-chapters N] [--provider PROVIDER] [--model MODEL] [--base-url URL]
-                [--list-voices] [--config FILE] [--init-config] [--profile-voices]
-                [--update-config] [--audition-voices] [--characters] [--no-review]
+                [--foreign-scripts {transliterate,skip,read}] [--max-chapters N]
+                [--provider PROVIDER] [--model MODEL] [--base-url URL] [--list-voices]
+                [--config FILE] [--init-config] [--profile-voices] [--update-config]
+                [--audition-voices] [--characters] [--no-review]
                 [--prime-replies | --no-prime-replies] [--auto-narrator]
                 [--llm-provider LLM_PROVIDER] [--llm-model LLM_MODEL]
                 [file_path]
@@ -297,6 +304,11 @@ options:
                         Read Roman numerals as numbers where context makes them certain: CHAPTER
                         XII, "II. Secondly", Charles II, chap. lxiii (default: on; [text]
                         roman_numerals in the config)
+  --foreign-scripts {transliterate,skip,read}
+                        Greek and Hebrew quotations, which no TTS voice can read: transliterate
+                        them into English letters ("tremontas kai phoboumenous"), skip them, or
+                        read them as written (default: transliterate; [text] foreign_scripts in
+                        the config)
   --max-chapters N      Only read the first N selected chapters (handy for a quick test)
 
 TTS provider:

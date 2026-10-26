@@ -13,7 +13,7 @@ DEFAULTS = {
     'tts': {'provider': 'kokoro', 'voice': 'af_sky', 'speed': 1.0},
     'llm': {'provider': None, 'model': None},
     'characters': {'prime_replies': True, 'llm_casting': True},
-    'text': {'skip_footnotes': True, 'roman_numerals': True},
+    'text': {'skip_footnotes': True, 'roman_numerals': True, 'foreign_scripts': 'transliterate'},
     'providers': {'kokoro': {'type': 'kokoro'}},
 }
 
@@ -38,6 +38,7 @@ model = "gemma4:26b-mlx"
 [text]
 skip_footnotes = true      # don't read footnotes/endnotes or their reference markers (--no-skip-footnotes)
 roman_numerals = true      # read "CHAPTER XII" and "II. Secondly" as numbers (--no-roman-numerals)
+foreign_scripts = "transliterate"  # Greek/Hebrew quotations: transliterate | skip | read (--foreign-scripts)
 
 [providers.kokoro]
 type = "kokoro"

@@ -59,6 +59,7 @@ user's Ollama Mac, roughly 50x faster than real time), or by Kokoro running loca
 | Faster, without checking each clip | add `--no-verify` |
 | Read footnotes too (they're skipped by default) | add `--no-skip-footnotes` |
 | Keep Roman numerals as written (converted by default) | add `--no-roman-numerals` |
+| Leave out Greek/Hebrew quotations (transliterated by default) | add `--foreign-scripts skip` |
 | Use a cloud LLM for this run | add `--llm-model kimi-k3:cloud` |
 | Audition every voice | `audiblez --audition-voices -o OUT` |
 

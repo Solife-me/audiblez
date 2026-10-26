@@ -153,14 +153,19 @@ class GlitchDetector:
             return f'{pause:.1f}s silence inside the clip'
         chars, total = self.rates.get(voice, (0, 0.0))
         if chars >= 300 and len(text) >= 40:
-            expected = len(text) * total / chars
+            expected = spoken_length(text) * total / chars
             if not 0.6 <= seconds / expected <= 1.7:
                 return f'{seconds:.1f}s of audio for text that usually takes {expected:.1f}s'
         return None
 
     def accept(self, audio, text, voice):
         chars, total = self.rates.get(voice, (0, 0.0))
-        self.rates[voice] = (chars + len(text), total + len(audio) / SAMPLE_RATE)
+        self.rates[voice] = (chars + spoken_length(text), total + len(audio) / SAMPLE_RATE)
+
+
+def spoken_length(text):
+    """Length of the text as spoken, roughly: a digit takes as long to say as a few letters ("28:20")."""
+    return len(text) + 3 * sum(c.isdigit() for c in text)
 
 
 class Leveler:

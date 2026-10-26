@@ -109,5 +109,41 @@ class ExtractTextTest(unittest.TestCase):
         self.assertEqual([c.get_name() for c in find_good_chapters(docs)], ['sermon1.xhtml'])
 
 
+class NestedElementsTest(unittest.TestCase):
+    def test_paragraph_inside_list_item_is_read_once(self):
+        from bs4 import BeautifulSoup
+        from audiblez.core import own_text, CONTENT_TAGS
+        soup = BeautifulSoup('<ol><li class="x"><p>What I speak here of God is but a shadow.</p></li>'
+                             '<li>Plain item</li><li>Lead-in <p>Inner paragraph.</p></li></ol>', 'lxml')
+        texts = [t for t in (own_text(e) for e in soup.find_all(CONTENT_TAGS)) if t]
+        self.assertEqual(texts, ['What I speak here of God is but a shadow.', 'Plain item', 'Lead-in', 'Inner paragraph.'])
+
+
+class ForeignScriptTest(unittest.TestCase):
+    TEXT = ('The matter is, that men fear. לְהֱוֺן זָאְעִין וְדָחֲלִין The Seventy render it, τρέμοντας καὶ φοβουμένους, '
+            'that is, that they fear.')
+
+    def test_transliterated(self):
+        from audiblez.text import normalize_for_speech
+        self.assertEqual(normalize_for_speech(self.TEXT), 'The matter is, that men fear. lehevon zaeen vedachaleen '
+                         'The Seventy render it, tremontas kai phoboomenoos, that is, that they fear.')
+
+    def test_skipped(self):
+        from audiblez.text import normalize_for_speech
+        self.assertEqual(normalize_for_speech(self.TEXT, foreign_scripts='skip'),
+                         'The matter is, that men fear. The Seventy render it, that is, that they fear.')
+
+    def test_read_as_written(self):
+        from audiblez.text import normalize_for_speech
+        self.assertEqual(normalize_for_speech(self.TEXT, foreign_scripts='read'), self.TEXT)
+
+    def test_well_known_words(self):
+        from audiblez.text import transliterate_greek as g, transliterate_hebrew as h
+        self.assertEqual(g('Ἐν ἀρχῇ ἦν ὁ λόγος'), 'en archay ayn ho logos')
+        self.assertEqual(h('בְּרֵאשִׁית בָּרָא אֱלֹהִים'), 'beresheet bara eloheem')
+        self.assertEqual(h('יְהוָה'), 'Jehovah')
+        self.assertEqual(h('שָׁלוֹם'), 'shalom')
+
+
 if __name__ == '__main__':
     unittest.main()

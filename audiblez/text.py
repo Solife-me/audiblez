@@ -149,8 +149,100 @@ def roman_numerals_to_numbers(text):
     return text
 
 
-def normalize_for_speech(text, roman_numerals=True):
+# Greek and Hebrew quotations (common in theology and classics) can't be voiced by any of the TTS models: phonon
+# spells Greek out letter by letter ("tau, rho, ... omicron") and turns Hebrew into gibberish. They are either
+# transliterated into the letters an English reader would say, or skipped.
+GREEK_SPAN = re.compile(r'[\u0370-\u03ff\u1f00-\u1fff]+(?:[\s\u0387\u037e,.;·]+[\u0370-\u03ff\u1f00-\u1fff]+)*')
+HEBREW_SPAN = re.compile(r'[\u0590-\u05ff\ufb1d-\ufb4f]+(?:[\s\u05be]+[\u0590-\u05ff\ufb1d-\ufb4f]+)*')
+GREEK_LETTERS = {'α': 'a', 'β': 'b', 'γ': 'g', 'δ': 'd', 'ε': 'e', 'ζ': 'z', 'η': 'ay', 'θ': 'th', 'ι': 'i', 'κ': 'k',
+                 'λ': 'l', 'μ': 'm', 'ν': 'n', 'ξ': 'x', 'ο': 'o', 'π': 'p', 'ρ': 'r', 'σ': 's', 'ς': 's', 'τ': 't',
+                 'υ': 'u', 'φ': 'ph', 'χ': 'ch', 'ψ': 'ps', 'ω': 'oh', 'ϝ': 'w'}
+GREEK_PAIRS = {'ου': 'oo', 'αι': 'ai', 'ει': 'ay', 'οι': 'oy', 'αυ': 'ow', 'ευ': 'yoo', 'ηυ': 'yoo', 'υι': 'wee',
+               'γγ': 'ng', 'γκ': 'nk', 'γχ': 'nch', 'γξ': 'nx'}
+HEBREW_CONSONANTS = {'א': '', 'ב': 'v', 'ג': 'g', 'ד': 'd', 'ה': 'h', 'ו': 'v', 'ז': 'z', 'ח': 'ch', 'ט': 't', 'י': 'y',
+                     'כ': 'ch', 'ך': 'ch', 'ל': 'l', 'מ': 'm', 'ם': 'm', 'נ': 'n', 'ן': 'n', 'ס': 's', 'ע': '', 'פ': 'f',
+                     'ף': 'f', 'צ': 'ts', 'ץ': 'ts', 'ק': 'k', 'ר': 'r', 'ש': 'sh', 'ת': 't'}
+HEBREW_HARD = {'ב': 'b', 'כ': 'k', 'ך': 'k', 'פ': 'p', 'ף': 'p'}  # with a dagesh
+HEBREW_VOWELS = {'\u05b0': 'e', '\u05b1': 'e', '\u05b2': 'a', '\u05b3': 'o', '\u05b4': 'i', '\u05b5': 'e',
+                 '\u05b6': 'e', '\u05b7': 'a', '\u05b8': 'a', '\u05b9': 'o', '\u05ba': 'o', '\u05bb': 'u', '\u05c7': 'o'}
+
+
+def transliterate_greek(text):
+    import unicodedata
+    words = []
+    for word in re.split(r'(\s+|[,.;·\u0387\u037e]+)', text):
+        rough = '\u0314' in unicodedata.normalize('NFD', word)
+        base = ''.join(c for c in unicodedata.normalize('NFD', word.lower()) if not unicodedata.combining(c))
+        out, i = '', 0
+        while i < len(base):
+            if base[i:i + 2] in GREEK_PAIRS:
+                out, i = out + GREEK_PAIRS[base[i:i + 2]], i + 2
+            else:
+                out, i = out + GREEK_LETTERS.get(base[i], {'·': ',', '\u0387': ',', '\u037e': '?'}.get(base[i], base[i])), i + 1
+        words.append('h' + out if rough and out[:1] in 'aeiou' else out)
+    return ''.join(words)
+
+
+DIVINE_NAME = re.compile(r'י[\u0591-\u05c7]*ה[\u0591-\u05c7]*ו[\u0591-\u05c7]*ה[\u0591-\u05c7]*')
+
+
+def transliterate_hebrew(text):
+    import unicodedata
+    text = DIVINE_NAME.sub('Jehovah', unicodedata.normalize('NFD', text))  # the tetragrammaton, as these authors read it
+    out = []
+    for word in re.split(r'(\s+|\u05be)', unicodedata.normalize('NFD', text)):
+        if not word.strip() or word == '\u05be':
+            out.append(' ')
+            continue
+        letters, i = [], 0  # (letter, marks)
+        while i < len(word):
+            j = i + 1
+            while j < len(word) and ('\u0591' <= word[j] <= '\u05c7' and word[j] not in '\u05be\u05c0\u05c3\u05c6'):
+                j += 1
+            letters.append((word[i], word[i + 1:j]))
+            i = j
+        sound = ''
+        for k, (letter, marks) in enumerate(letters):
+            if not ('\u05d0' <= letter <= '\u05ea'):
+                sound += {'\u05c3': '.', '\u05c0': ','}.get(letter, letter if letter.isascii() else '')
+                continue
+            vowels = [m for m in marks if m in HEBREW_VOWELS]
+            last = k == len(letters) - 1
+            if letter == 'ו' and '\u05b9' in marks and not vowels[1:]:
+                sound += 'o'  # holam male
+                continue
+            if letter == 'ו' and '\u05bc' in marks and not vowels:
+                sound += 'u'  # shuruq
+                continue
+            if letter == 'י' and not vowels and sound[-1:] in ('i', 'e'):
+                sound = sound[:-1] + ('ee' if sound[-1] == 'i' else 'ay')  # yod only marks the vowel
+                continue
+            if letter == 'ש':
+                consonant = 's' if '\u05c2' in marks else 'sh'
+            else:
+                consonant = HEBREW_HARD.get(letter, HEBREW_CONSONANTS.get(letter, '')) if '\u05bc' in marks \
+                    else HEBREW_CONSONANTS.get(letter, '')
+            # shva is (roughly) only voiced on a word's first letter; elsewhere it closes a syllable
+            sound += consonant + ''.join(HEBREW_VOWELS[v] for v in vowels if not (v == '\u05b0' and (last or k > 0)))
+        out.append(sound)
+    return ''.join(out).strip()
+
+
+def handle_foreign_scripts(text, mode='transliterate'):
+    if mode == 'read':
+        return text
+    if mode == 'skip':
+        text = HEBREW_SPAN.sub('', GREEK_SPAN.sub('', text))
+        text = re.sub(r'\(\s*\)|\[\s*\]', '', text)
+        text = re.sub(r'\s+([,.;:])', r'\1', re.sub(r'([,;:])\s*(?=[,;:.])', '', text))
+        return re.sub(r'\s{2,}', ' ', text).strip()
+    text = GREEK_SPAN.sub(lambda m: transliterate_greek(m.group(0)), text)
+    return HEBREW_SPAN.sub(lambda m: transliterate_hebrew(m.group(0)), text)
+
+
+def normalize_for_speech(text, roman_numerals=True, foreign_scripts='transliterate'):
     text = PAGE_MARKER.sub('', text)
+    text = handle_foreign_scripts(text, foreign_scripts)
     if roman_numerals:
         text = roman_numerals_to_numbers(text)  # before abbreviations: "chap.", "Ps." and "St." are context here
     text = BIBLE_ABBREVIATION.sub(lambda m: (ORDINALS[int(m.group(1))] + ' ' if m.group(1) else '') + BIBLE_BOOKS[m.group(2)] + ' ', text)
@@ -204,8 +296,9 @@ def pack_sentences(sentences, max_chars):
     return chunks
 
 
-def chunk_paragraph(paragraph, voice, max_chars, roman_numerals=True):
-    paragraph = normalize_for_speech(paragraph, roman_numerals)
+def chunk_paragraph(paragraph, voice, max_chars, **speech):
+    """speech: options for normalize_for_speech (roman_numerals, foreign_scripts)."""
+    paragraph = normalize_for_speech(paragraph, **speech)
     if len(paragraph) <= max_chars:
         pieces = [paragraph]
     else:
@@ -216,6 +309,6 @@ def chunk_paragraph(paragraph, voice, max_chars, roman_numerals=True):
     return chunks
 
 
-def chunk_text(text, voice, max_chars, roman_numerals=True):
+def chunk_text(text, voice, max_chars, **speech):
     """Chunks for narrating text in a single voice."""
-    return [c for p in split_paragraphs(text) for c in chunk_paragraph(p, voice, max_chars, roman_numerals)]
+    return [c for p in split_paragraphs(text) for c in chunk_paragraph(p, voice, max_chars, **speech)]

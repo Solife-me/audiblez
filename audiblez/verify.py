@@ -11,6 +11,10 @@ from audiblez.tts import SAMPLE_RATE
 
 MIN_RUN = 4  # dropped or invented runs shorter than this are usually the recognizer's own mistakes
 SPOKEN_FORMS = {'mister': 'mr', 'missus': 'mrs', 'miz': 'ms', 'doctor': 'dr', 'saint': 'st'}
+# Numbers are left out of the comparison: the recognizer writes "an hundred and twenty seven" as "127"
+NUMBER_WORDS = set('zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen '
+                   'seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand '
+                   'million first second third fourth fifth sixth seventh eighth ninth tenth'.split())
 
 
 def available():
@@ -19,7 +23,7 @@ def available():
 
 def words(text):
     text = text.lower().replace('’', "'").replace("'", '')
-    return [SPOKEN_FORMS.get(w, w) for w in re.findall(r'[a-z0-9]+', text)]
+    return [SPOKEN_FORMS.get(w, w) for w in re.findall(r'[a-z0-9]+', text) if not w.isdigit() and w not in NUMBER_WORDS]
 
 
 class Verifier:

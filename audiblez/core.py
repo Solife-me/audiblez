@@ -69,7 +69,7 @@ def set_espeak_library():
 def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.',
          max_chapters=None, max_sentences=None, selected_chapters=None, post_event=None, engine=None,
          characters=False, llm=None, review=True, auto_narrator=False, prime_replies=False, verifier=None,
-         llm_casting=True, skip_footnotes=True, roman_numerals=True):
+         llm_casting=True, skip_footnotes=True, roman_numerals=True, foreign_scripts='transliterate'):
     if post_event: post_event('CORE_STARTED')
     load_spacy()
     if output_folder != '.':
@@ -127,6 +127,7 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
     eta = strfdelta((stats.total_chars - stats.processed_chars) / stats.chars_per_sec)
     print(f'Estimated time remaining (assuming {stats.chars_per_sec} chars/sec): {eta}')
     engine.preflight(voice, speed)
+    speech = dict(roman_numerals=roman_numerals, foreign_scripts=foreign_scripts)  # how text is prepared for the TTS
     if verifier is None and engine.name != 'kokoro' and engine.max_chars > UNVERIFIED_MAX_CHARS:
         # Nothing will catch a TTS model looping on a long input, so read in pieces short enough not to trigger it
         engine.max_chars = UNVERIFIED_MAX_CHARS
@@ -137,6 +138,7 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
         text = chapter.extracted_text
         voice_tag = slug(voice) + (f'_cast{cast.signature()}{"p" if prime_replies else ""}' if cast else '')
         voice_tag += ('_withnotes' if not skip_footnotes else '') + ('_roman' if not roman_numerals else '')
+        voice_tag += f'_{foreign_scripts}' if foreign_scripts != 'transliterate' else ''
         chapter_wav_path = Path(output_folder) / f'{stem}_chapter_{i}_{voice_tag}_{slug(chapter.get_name())}.wav'
         if Path(chapter_wav_path).exists():
             print(f'File for chapter {i} already exists. Skipping')
@@ -153,10 +155,10 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
         start_time = time.time()
         if post_event: post_event('CORE_CHAPTER_STARTED', chapter_index=chapter.chapter_index)
         if cast:
-            chunks = (chunk_text(intro, voice, engine.max_chars, roman_numerals)
-                      + cast.chunks(chapter.extracted_text, engine.max_chars, prime_replies, roman_numerals))
+            chunks = (chunk_text(intro, voice, engine.max_chars, **speech)
+                      + cast.chunks(chapter.extracted_text, engine.max_chars, prime_replies, **speech))
         else:
-            chunks = chunk_text(f'{intro}\n\n{text}' if intro else text, voice, engine.max_chars, roman_numerals)
+            chunks = chunk_text(f'{intro}\n\n{text}' if intro else text, voice, engine.max_chars, **speech)
         if synthesize_chunks(engine, chunks, speed, chapter_wav_path, stats, post_event=post_event, max_chunks=max_sentences,
                              verifier=verifier):
             chapter_wav_files.append(chapter_wav_path)
