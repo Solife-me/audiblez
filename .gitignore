@@ -12,3 +12,6 @@ chapters.txt
 *.onnx
 dist
 .venv
+*.pdf
+*.m4b
+*.part
