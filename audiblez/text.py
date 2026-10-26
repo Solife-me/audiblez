@@ -8,8 +8,12 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 
-PARAGRAPH_PAUSE = 0.45  # seconds of silence after each paragraph
-SENTENCE_PAUSE = 0.0
+# Seconds of silence between clips. Clips are trimmed of the silence TTS models pad them with,
+# so these are the actual gaps the listener hears.
+PARAGRAPH_PAUSE = 1.0  # after a paragraph of narration
+DIALOGUE_PARAGRAPH_PAUSE = 0.45  # after a paragraph with dialogue: a turn in a conversation
+SENTENCE_PAUSE = 0.3
+CLAUSE_PAUSE = 0.12  # e.g. between “My dear Mr. Bennet,” and said his lady
 
 
 @dataclass
@@ -17,6 +21,27 @@ class Chunk:
     text: str
     voice: str
     paragraph_end: bool = False
+    pause_after: float = None  # None: decided from paragraph_end and punctuation
+    # Chunks of one voice that are synthesized together as a single utterance (for natural intonation),
+    # then cut apart: joint holds all the texts of that utterance, joint_index which one this chunk is.
+    # A joint text without a chunk (index 0 when joint_context is set) is only there for context.
+    joint: tuple = None
+    joint_index: int = 0
+    joint_context: bool = False
+
+    def pause(self):
+        if self.pause_after is not None:
+            return self.pause_after
+        if self.paragraph_end:
+            return PARAGRAPH_PAUSE
+        return pause_after_text(self.text)
+
+
+def pause_after_text(text):
+    end = text.rstrip(' ”"’\')]')[-1:] if text.strip() else ''
+    if end in '.!?…':
+        return SENTENCE_PAUSE
+    return CLAUSE_PAUSE
 
 
 @lru_cache(maxsize=1)

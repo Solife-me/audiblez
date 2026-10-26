@@ -20,7 +20,8 @@ from tabulate import tabulate
 from pathlib import Path
 from string import Formatter
 from bs4 import BeautifulSoup
-from audiblez.text import chunk_text, PARAGRAPH_PAUSE
+from audiblez.text import chunk_text
+from audiblez.audio import Leveler, GlitchDetector, trim, silence, split_at_pauses, longest_pause
 from audiblez.tts import TTSEngine, KokoroEngine, SAMPLE_RATE
 from ebooklib import epub
 from pick import pick
@@ -67,7 +68,7 @@ def set_espeak_library():
 
 def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.',
          max_chapters=None, max_sentences=None, selected_chapters=None, post_event=None, engine=None,
-         characters=False, llm=None, review=True, auto_narrator=False):
+         characters=False, llm=None, review=True, auto_narrator=False, prime_replies=False):
     if post_event: post_event('CORE_STARTED')
     load_spacy()
     if output_folder != '.':
@@ -129,7 +130,7 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
     chapter_titles = []
     for i, chapter in enumerate(selected_chapters, start=1):
         text = chapter.extracted_text
-        voice_tag = slug(voice) + (f'_cast{cast.signature()}' if cast else '')
+        voice_tag = slug(voice) + (f'_cast{cast.signature()}{"p" if prime_replies else ""}' if cast else '')
         chapter_wav_path = Path(output_folder) / f'{stem}_chapter_{i}_{voice_tag}_{slug(chapter.get_name())}.wav'
         if Path(chapter_wav_path).exists():
             print(f'File for chapter {i} already exists. Skipping')
@@ -146,7 +147,8 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
         start_time = time.time()
         if post_event: post_event('CORE_CHAPTER_STARTED', chapter_index=chapter.chapter_index)
         if cast:
-            chunks = chunk_text(intro, voice, engine.max_chars) + cast.chunks(chapter.extracted_text, engine.max_chars)
+            chunks = (chunk_text(intro, voice, engine.max_chars)
+                      + cast.chunks(chapter.extracted_text, engine.max_chars, prime_replies=prime_replies))
         else:
             chunks = chunk_text(f'{intro}\n\n{text}' if intro else text, voice, engine.max_chars)
         if synthesize_chunks(engine, chunks, speed, chapter_wav_path, stats, post_event=post_event, max_chunks=max_sentences):
@@ -226,22 +228,32 @@ def print_selected_chapters(document_chapters, chapters):
 
 def synthesize_chunks(engine, chunks, speed, out_path, stats=None, post_event=None, max_chunks=None):
     """Synthesizes the chunks straight into a wav file, so memory use doesn't grow with the chapter length.
-    Writes to a .part file first so an interrupted chapter is redone on the next run. Returns False if no audio."""
+    Each clip is trimmed of the model's padding silence, levelled to the same loudness per voice and followed by
+    a pause that fits its punctuation. Writes to a .part file first so an interrupted chapter is redone on the next
+    run. Returns False if no audio."""
     out_path = Path(out_path)
     tmp_path = out_path.with_name(out_path.name + '.part')
-    pause = np.zeros(int(PARAGRAPH_PAUSE * sample_rate), dtype=np.float32)
+    leveler = Leveler()
+    glitches = GlitchDetector()
+    joint_pieces = {}  # joint texts -> trimmed audio pieces, for chunks synthesized as one utterance
     samples_written = 0
     with soundfile.SoundFile(tmp_path, 'w', samplerate=sample_rate, channels=1, subtype='PCM_16', format='WAV') as f:
         for i, chunk in enumerate(chunks):
             if max_chunks and i > max_chunks: break
             started = time.time()
-            audio = engine.synthesize(chunk.text, chunk.voice, speed)
+            if chunk.joint:
+                key = (chunk.voice, chunk.joint)
+                if key not in joint_pieces:
+                    joint_pieces[key] = synthesize_joint(engine, chunk, speed, glitches)
+                audio = joint_pieces[key][chunk.joint_index]
+            else:
+                audio = synthesize_clip(engine, chunk.text, chunk.voice, speed, glitches)
             if len(audio) == 0:
                 continue
+            audio = leveler(audio, chunk.voice)
             f.write(audio)
+            f.write(silence(chunk.pause()))
             samples_written += len(audio)
-            if chunk.paragraph_end:
-                f.write(pause)
             if stats:
                 stats.processed_chars += len(chunk.text)
                 measured = len(chunk.text) / max(time.time() - started, 1e-3)
@@ -256,6 +268,39 @@ def synthesize_chunks(engine, chunks, speed, out_path, stats=None, post_event=No
         return False
     tmp_path.replace(out_path)
     return True
+
+
+def synthesize_clip(engine, text, voice, speed, glitches, attempts=3):
+    """Synthesizes and trims one clip, regenerating it when the TTS output looks broken. Keeps the best attempt."""
+    best, best_problem = None, None
+    for attempt in range(attempts):
+        audio = trim(engine.synthesize(text, voice, speed))
+        problem = glitches.problem(audio, text, voice)
+        if problem is None:
+            glitches.accept(audio, text, voice)
+            return audio
+        print(f'TTS glitch ({problem}) in "{text[:50]}...", regenerating ({attempt + 1}/{attempts})')
+        if best is None or longest_pause(audio) < longest_pause(best):
+            best, best_problem = audio, problem
+    print(f'Warning: keeping a clip that still has a problem ({best_problem}): "{text[:80]}..."')
+    return best
+
+
+def synthesize_joint(engine, chunk, speed, glitches=None):
+    """Synthesizes all the texts of a joint utterance in one request, so each part keeps the intonation it has in
+    context, then cuts it at its pauses. Each part is also synthesized on its own: its length tells where the cut
+    belongs (far more precisely than a character count), and it is the fallback when no clean cut is found."""
+    glitches = glitches or GlitchDetector()
+    texts = [t.strip(' “”"‘’') for t in chunk.joint]
+    separate = [synthesize_clip(engine, t, chunk.voice, speed, glitches) for t in texts]
+    joint = synthesize_clip(engine, ' '.join(texts), chunk.voice, speed, glitches)
+    pieces = split_at_pauses(joint, [max(len(p), 1) for p in separate])
+    if pieces is None:
+        pieces = separate
+    pieces = [trim(p) for p in pieces]
+    if chunk.joint_context:
+        pieces[0] = None  # the context line is only there to set the tone
+    return pieces
 
 
 def gen_audio_segments(engine, text, voice, speed, stats=None, max_sentences=None, post_event=None):

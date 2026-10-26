@@ -15,7 +15,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from audiblez.text import Chunk, split_paragraphs, pack_sentences, split_sentences
+from audiblez.text import Chunk, split_paragraphs, pack_sentences, split_sentences, PARAGRAPH_PAUSE, \
+    DIALOGUE_PARAGRAPH_PAUSE
 
 NARRATOR = 'narrator'
 UNKNOWN = 'unknown'
@@ -410,13 +411,19 @@ class Cast:
         items = sorted((c.name, c.voice) for c in self.registry.characters.values())
         return hashlib.sha1(json.dumps([self.narrator_voice, items]).encode()).hexdigest()[:8]
 
-    def chunks(self, text, max_chars):
-        """Chunks for one chapter: narration in the narrator's voice, each quote in its speaker's voice."""
+    def chunks(self, text, max_chars, prime_replies=False):
+        """Chunks for one chapter: narration in the narrator's voice, each quote in its speaker's voice.
+
+        Quotes of one speaker split by a short dialogue tag ("“My dear,” said she, “have you heard?”") are
+        synthesized as one utterance so the first part keeps its continuing intonation. With prime_replies, a
+        reply that opens a paragraph is synthesized after the line it answers (in the replying voice; that part
+        is cut off again), so it is spoken as a response rather than out of nowhere."""
         spans_by_paragraph = paragraph_spans(text, self.style)
         speakers = self.speakers_by_chapter.get(text_key(text), [])
         chunks, qi = [], 0
+        last_line = None  # (voice, text) of the latest quote, the line a reply answers
         for spans in spans_by_paragraph:
-            voiced = []  # (voice, text), merging neighbours that share a voice
+            voiced = []  # [voice, text, is_quote], merging neighbours that share a voice
             for s in spans:
                 if s.is_quote:
                     voice = self.voice_for(speakers[qi] if qi < len(speakers) else UNKNOWN)
@@ -424,20 +431,56 @@ class Cast:
                 else:
                     voice = self.narrator_voice
                 if voiced and voiced[-1][0] == voice:
-                    voiced[-1] = (voice, voiced[-1][1] + s.text)
+                    voiced[-1][1] += s.text
+                    voiced[-1][2] = voiced[-1][2] or s.is_quote
                 else:
-                    voiced.append((voice, s.text))
+                    voiced.append([voice, s.text, s.is_quote])
+            voiced = [(v, t.strip(), q) for v, t, q in voiced if re.search(r'\w', t)]  # drop stray punctuation
+            has_dialogue = any(q for _, _, q in voiced)
+
+            # Group each speaker's quotes that are separated only by a short narrator tag
+            groups, member = [], {}
+            for idx, (voice, part, is_quote) in enumerate(voiced):
+                if not is_quote or voice == self.narrator_voice or idx in member:
+                    continue
+                group = [idx]
+                while (group[-1] + 2 < len(voiced) and len(voiced[group[-1] + 1][1]) < 100
+                       and voiced[group[-1] + 2][0] == voice and voiced[group[-1] + 2][2]):
+                    group.append(group[-1] + 2)
+                context = None
+                if prime_replies and idx == 0 and last_line and last_line[0] != voice:
+                    context = last_sentence(last_line[1])
+                texts = ([context] if context else []) + [voiced[k][1] for k in group]
+                if (len(texts) > 1) and sum(map(len, texts)) <= max_chars:
+                    groups.append((tuple(texts), bool(context)))
+                    for pos, k in enumerate(group):
+                        member[k] = (len(groups) - 1, pos + (1 if context else 0))
+
             paragraph_chunks = []
-            for voice, part in voiced:
-                part = part.strip()
-                if not re.search(r'\w', part):
-                    continue  # stray punctuation between quotes
-                pieces = [part] if len(part) <= max_chars else pack_sentences(split_sentences(part), max_chars)
-                paragraph_chunks += [Chunk(p, voice) for p in pieces]
+            for idx, (voice, part, is_quote) in enumerate(voiced):
+                if idx in member:
+                    g, pos = member[idx]
+                    texts, has_context = groups[g]
+                    paragraph_chunks.append(Chunk(part, voice, joint=texts, joint_index=pos, joint_context=has_context))
+                else:
+                    pieces = [part] if len(part) <= max_chars else pack_sentences(split_sentences(part), max_chars)
+                    paragraph_chunks += [Chunk(p, voice) for p in pieces]
+                if is_quote and voice != self.narrator_voice:
+                    last_line = (voice, part)
             if paragraph_chunks:
                 paragraph_chunks[-1].paragraph_end = True
+                paragraph_chunks[-1].pause_after = DIALOGUE_PARAGRAPH_PAUSE if has_dialogue else PARAGRAPH_PAUSE
             chunks += paragraph_chunks
         return chunks
+
+
+def last_sentence(text, max_chars=120):
+    text = text.strip(' “”"‘’')
+    sentences = [s for s in re.split(r'(?<=[.!?…])\s+', text) if s]
+    last = sentences[-1] if sentences else text
+    if len(last) > max_chars:
+        last = last[-max_chars:].split(' ', 1)[-1]
+    return last if last.endswith(('.', '!', '?', '…')) else last + '.'
 
 
 def prepare_cast(chapters, book, engine, narrator_voice, llm, output_folder, stem, auto_narrator=False, log=print):

@@ -110,6 +110,15 @@ get their own voices; minor ones share. The first run writes `<book>.cast.toml` 
 change voices. The second run makes the audiobook. Attributions are cached in `<book>.speakers.json`, so changing
 voices doesn't call the LLM again. Add `--no-review` to do both steps at once.
 
+To make the cast sound like a conversation rather than clips stitched together, every clip is trimmed of the silence
+TTS models pad it with and followed by a pause that fits (short after "…,” said she", a turn-taking gap between
+speakers), and every clip is levelled to the same loudness. A quote split by a dialogue tag ("“My dear,” said she,
+“have you heard?”") is spoken as one utterance and cut at its pause, so it keeps its intonation.
+`--prime-replies` (or `prime_replies = true` under `[characters]` in the config) goes further: each reply is
+synthesized right after the line it answers, in the replying voice, and that line is then cut off, so the reply is
+spoken as a response. Clips where the TTS model glitches (a long silence mid-speech, or dropped words) are
+regenerated automatically.
+
 `--auto-narrator` asks the LLM about the author (or first-person narrator) and picks a narrator voice of the matching
 gender and accent, e.g. a British male voice for a Charles Spurgeon sermon. It only switches voice when the
 LLM is confident and a matching voice is tagged. `-v` always wins.
