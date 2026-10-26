@@ -79,5 +79,35 @@ class FootnoteTest(unittest.TestCase):
         self.assertEqual(len(self.text(skip=False)), 6)
 
 
+class ExtractTextTest(unittest.TestCase):
+    def extract(self, body, name='chapter_1.xhtml'):
+        from ebooklib import epub
+        from audiblez.core import find_document_chapters_and_extract_texts
+        book = epub.EpubBook()
+        item = epub.EpubHtml(file_name=name, content=f'<html><body>{body}</body></html>')
+        book.add_item(item)
+        return find_document_chapters_and_extract_texts(book)[0].extracted_text.splitlines()
+
+    def test_paragraphs_inside_list_items_are_read_once(self):
+        body = '<ol><li><p>First point.</p></li><li><p>Second <em>point</em>.</p></li></ol>'
+        self.assertEqual(self.extract(body), ['First point.', 'Second point.'])
+
+    def test_nested_lists_are_read_once(self):
+        body = '<ul><li>Fruit<ul><li>Apples</li><li>Pears</li></ul></li></ul>'
+        self.assertEqual(self.extract(body), ['Fruit.', 'Apples.', 'Pears.'])
+
+    def test_text_around_a_nested_paragraph_keeps_its_spaces_and_skips_comments(self):
+        body = '<ul><li>Intro<!-- page 12 --><p>Para one.</p>tail</li></ul>'
+        self.assertEqual(self.extract(body), ['Intro tail.', 'Para one.'])
+
+    def test_navigation_documents_are_not_read_as_chapters(self):
+        from types import SimpleNamespace
+        import ebooklib
+        from audiblez.core import find_good_chapters
+        docs = [SimpleNamespace(get_name=lambda n=n: n, get_type=lambda: ebooklib.ITEM_DOCUMENT, extracted_text='x' * 50)
+                for n in ('OEBPS/toc.xhtml', 'nav.xhtml', 'cover.xhtml', 'sermon1.xhtml')]
+        self.assertEqual([c.get_name() for c in find_good_chapters(docs)], ['sermon1.xhtml'])
+
+
 if __name__ == '__main__':
     unittest.main()

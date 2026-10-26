@@ -19,7 +19,7 @@ from types import SimpleNamespace
 from tabulate import tabulate
 from pathlib import Path
 from string import Formatter
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, CData, NavigableString, Tag
 from audiblez.text import chunk_text, pack_sentences, split_sentences, pause_after_text
 from audiblez.audio import Leveler, GlitchDetector, trim, silence, split_at_pauses, longest_pause
 from audiblez.tts import TTSEngine, KokoroEngine, SAMPLE_RATE
@@ -411,12 +411,16 @@ def own_text(element):
     own. Otherwise every paragraph wrapped in a list item is read twice in a row."""
     if not element.find(CONTENT_TAGS):
         return element.get_text().strip()
-    parts = []
-    for string in element.find_all(string=True):
-        owner = next((parent for parent in string.parents if parent.name in CONTENT_TAGS), None)
-        if owner is element:
-            parts.append(string)
-    return ''.join(parts).strip()
+
+    def strings(el):
+        for child in el.children:
+            if type(child) in (NavigableString, CData):  # the strings get_text() reads: no comments, scripts or styles
+                yield child
+            elif isinstance(child, Tag):
+                # a space where a nested paragraph was, so the words on either side of it don't run together
+                yield ' ' if child.name in CONTENT_TAGS else ''.join(strings(child))
+
+    return ''.join(strings(element)).strip()
 
 
 def find_document_chapters_and_extract_texts(book, skip_footnotes=True):
