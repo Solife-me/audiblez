@@ -7,7 +7,6 @@ import os
 import traceback
 from glob import glob
 
-import torch.cuda
 import spacy
 import ebooklib
 import soundfile
@@ -22,11 +21,12 @@ from tabulate import tabulate
 from pathlib import Path
 from string import Formatter
 from bs4 import BeautifulSoup
-from kokoro import KPipeline
+from audiblez.text import chunk_text, PARAGRAPH_PAUSE
+from audiblez.tts import TTSEngine, KokoroEngine, SAMPLE_RATE
 from ebooklib import epub
 from pick import pick
 
-sample_rate = 24000
+sample_rate = SAMPLE_RATE
 
 
 def load_spacy():
@@ -68,34 +68,27 @@ def set_espeak_library():
         print("On Linux: sudo apt install espeak-ng")
 
 
-def main(file_path, voice, pick_manually, speed, output_folder='.',
-         max_chapters=None, max_sentences=None, selected_chapters=None, post_event=None):
+def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.',
+         max_chapters=None, max_sentences=None, selected_chapters=None, post_event=None, engine=None):
     if post_event: post_event('CORE_STARTED')
     load_spacy()
     if output_folder != '.':
         Path(output_folder).mkdir(parents=True, exist_ok=True)
 
-    filename = Path(file_path).name
+    stem = Path(file_path).stem
+    engine = engine or KokoroEngine()
+    voice = voice or 'af_sky'
+    speed = speed or 1.0
+    engine.check_voice(voice)
 
-    extension = '.epub'
-    book = epub.read_epub(file_path)
-    meta_title = book.get_metadata('DC', 'title')
-    title = meta_title[0][0] if meta_title else ''
-    meta_creator = book.get_metadata('DC', 'creator')
-    creator = meta_creator[0][0] if meta_creator else ''
-
-    cover_maybe = find_cover(book)
-    cover_image = cover_maybe.get_content() if cover_maybe else b""
-    if cover_maybe:
-        print(f'Found cover image {cover_maybe.file_name} in {cover_maybe.media_type} format')
-
-    document_chapters = find_document_chapters_and_extract_texts(book)
+    book = load_book(file_path)
+    title, creator, document_chapters = book.title, book.creator, book.chapters
 
     if not selected_chapters:
         if pick_manually is True:
             selected_chapters = pick_chapters(document_chapters)
         else:
-            selected_chapters = find_good_chapters(document_chapters)
+            selected_chapters = book.good_chapters
     print_selected_chapters(document_chapters, selected_chapters)
     texts = [c.extracted_text for c in selected_chapters]
 
@@ -106,56 +99,81 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
     stats = SimpleNamespace(
         total_chars=sum(map(len, texts)),
         processed_chars=0,
-        chars_per_sec=500 if torch.cuda.is_available() else 50)
+        chars_per_sec=engine.chars_per_sec)
     print('Started at:', time.strftime('%H:%M:%S'))
+    print(f'Using {engine.name} with voice {voice}')
     print(f'Total characters: {stats.total_chars:,}')
     print('Total words:', len(' '.join(texts).split()))
     eta = strfdelta((stats.total_chars - stats.processed_chars) / stats.chars_per_sec)
     print(f'Estimated time remaining (assuming {stats.chars_per_sec} chars/sec): {eta}')
-    set_espeak_library()
-    pipeline = KPipeline(lang_code=voice[0])  # a for american or b for british etc.
+    engine.preflight(voice, speed)
 
     chapter_wav_files = []
+    chapter_titles = []
     for i, chapter in enumerate(selected_chapters, start=1):
         if max_chapters and i > max_chapters: break
         text = chapter.extracted_text
-        xhtml_file_name = chapter.get_name().replace(' ', '_').replace('/', '_').replace('\\', '_')
-        chapter_wav_path = Path(output_folder) / filename.replace(extension, f'_chapter_{i}_{voice}_{xhtml_file_name}.wav')
-        chapter_wav_files.append(chapter_wav_path)
+        chapter_wav_path = Path(output_folder) / f'{stem}_chapter_{i}_{slug(voice)}_{slug(chapter.get_name())}.wav'
         if Path(chapter_wav_path).exists():
             print(f'File for chapter {i} already exists. Skipping')
             stats.processed_chars += len(text)
+            chapter_wav_files.append(chapter_wav_path)
+            chapter_titles.append(chapter_title(chapter, i))
             if post_event:
                 post_event('CORE_CHAPTER_FINISHED', chapter_index=chapter.chapter_index)
             continue
         if len(text.strip()) < 10:
             print(f'Skipping empty chapter {i}')
-            chapter_wav_files.remove(chapter_wav_path)
             continue
         if i == 1:
             # add intro text
             text = f'{title} – {creator}.\n\n' + text
         start_time = time.time()
         if post_event: post_event('CORE_CHAPTER_STARTED', chapter_index=chapter.chapter_index)
-        audio_segments = gen_audio_segments(
-            pipeline, text, voice, speed, stats, post_event=post_event, max_sentences=max_sentences)
-        if audio_segments:
-            final_audio = np.concatenate(audio_segments)
-            soundfile.write(chapter_wav_path, final_audio, sample_rate)
-            end_time = time.time()
-            delta_seconds = end_time - start_time
-            chars_per_sec = len(text) / delta_seconds
+        chunks = chunk_text(text, voice, engine.max_chars)
+        if synthesize_chunks(engine, chunks, speed, chapter_wav_path, stats, post_event=post_event, max_chunks=max_sentences):
+            chapter_wav_files.append(chapter_wav_path)
+            chapter_titles.append(chapter_title(chapter, i))
+            delta_seconds = time.time() - start_time
             print('Chapter written to', chapter_wav_path)
             if post_event: post_event('CORE_CHAPTER_FINISHED', chapter_index=chapter.chapter_index)
-            print(f'Chapter {i} read in {delta_seconds:.2f} seconds ({chars_per_sec:.0f} characters per second)')
+            print(f'Chapter {i} read in {delta_seconds:.2f} seconds ({len(text) / delta_seconds:.0f} characters per second)')
         else:
             print(f'Warning: No audio generated for chapter {i}')
-            chapter_wav_files.remove(chapter_wav_path)
 
-    if has_ffmpeg:
-        create_index_file(title, creator, chapter_wav_files, output_folder)
-        create_m4b(chapter_wav_files, filename, cover_image, output_folder)
+    if has_ffmpeg and chapter_wav_files:
+        tempo = 1.0 if engine.supports_speed else speed
+        create_index_file(title, creator, chapter_wav_files, output_folder, chapter_titles, tempo=tempo)
+        create_m4b(chapter_wav_files, f'{stem}.m4b', book.cover_image, output_folder, tempo=tempo)
         if post_event: post_event('CORE_FINISHED')
+
+
+def slug(name):
+    return re.sub(r'[^\w.-]+', '_', name).strip('_')
+
+
+def chapter_title(chapter, i):
+    return getattr(chapter, 'title', None) or f'Chapter {i}'
+
+
+def load_book(file_path):
+    """Returns a SimpleNamespace(title, creator, cover_image, chapters, good_chapters) for an epub or pdf."""
+    if Path(file_path).suffix.lower() == '.pdf':
+        from audiblez.pdf import load_pdf
+        return load_pdf(file_path)
+    book = epub.read_epub(file_path)
+    meta_title = book.get_metadata('DC', 'title')
+    meta_creator = book.get_metadata('DC', 'creator')
+    cover_maybe = find_cover(book)
+    if cover_maybe:
+        print(f'Found cover image {cover_maybe.file_name} in {cover_maybe.media_type} format')
+    document_chapters = find_document_chapters_and_extract_texts(book)
+    return SimpleNamespace(
+        title=meta_title[0][0] if meta_title else '',
+        creator=meta_creator[0][0] if meta_creator else '',
+        cover_image=cover_maybe.get_content() if cover_maybe else b'',
+        chapters=document_chapters,
+        good_chapters=find_good_chapters(document_chapters))
 
 
 def find_cover(book):
@@ -188,61 +206,59 @@ def print_selected_chapters(document_chapters, chapters):
         for i, c in enumerate(document_chapters, start=1)
     ], headers=['#', 'Chapter', 'Text Length', 'Selected', 'First words']))
 
-def split_long_sentence(text, max_length=400):
-    """Split a long sentence around the 500 chars, picking the first whitespace after the 500th character. """
-    if len(text) <= max_length:
-        return [text]
-    parts = []
-    while len(text) > max_length:
-        split_index = text.rfind(' ', 0, max_length)
-        if split_index == -1:
-            split_index = max_length
-        parts.append(text[:split_index].strip())
-        text = text[split_index:].strip()
-    if text:
-        parts.append(text)
-    return parts
+def synthesize_chunks(engine, chunks, speed, out_path, stats=None, post_event=None, max_chunks=None):
+    """Synthesizes the chunks straight into a wav file, so memory use doesn't grow with the chapter length.
+    Writes to a .part file first so an interrupted chapter is redone on the next run. Returns False if no audio."""
+    out_path = Path(out_path)
+    tmp_path = out_path.with_name(out_path.name + '.part')
+    pause = np.zeros(int(PARAGRAPH_PAUSE * sample_rate), dtype=np.float32)
+    samples_written = 0
+    with soundfile.SoundFile(tmp_path, 'w', samplerate=sample_rate, channels=1, subtype='PCM_16', format='WAV') as f:
+        for i, chunk in enumerate(chunks):
+            if max_chunks and i > max_chunks: break
+            started = time.time()
+            audio = engine.synthesize(chunk.text, chunk.voice, speed)
+            if len(audio) == 0:
+                continue
+            f.write(audio)
+            samples_written += len(audio)
+            if chunk.paragraph_end:
+                f.write(pause)
+            if stats:
+                stats.processed_chars += len(chunk.text)
+                measured = len(chunk.text) / max(time.time() - started, 1e-3)
+                stats.chars_per_sec = 0.9 * stats.chars_per_sec + 0.1 * measured
+                stats.progress = min(100, stats.processed_chars * 100 // max(stats.total_chars, 1))
+                stats.eta = strfdelta(max(stats.total_chars - stats.processed_chars, 0) / stats.chars_per_sec)
+                if post_event: post_event('CORE_PROGRESS', stats=stats)
+                print(f'Estimated time remaining: {stats.eta}')
+                print('Progress:', f'{stats.progress}%\n')
+    if samples_written == 0:
+        tmp_path.unlink()
+        return False
+    tmp_path.replace(out_path)
+    return True
 
 
-def gen_audio_segments(pipeline, text, voice, speed, stats=None, max_sentences=None, post_event=None):
-    nlp = spacy.load('xx_ent_wiki_sm')
-    nlp.add_pipe('sentencizer')
+def gen_audio_segments(engine, text, voice, speed, stats=None, max_sentences=None, post_event=None):
+    """Returns the audio for text as a list of numpy arrays. engine may also be a Kokoro KPipeline."""
+    if not isinstance(engine, TTSEngine):
+        engine = KokoroEngine(pipeline=engine)
     audio_segments = []
-    doc = nlp(text)
-    lang_code = voice[0]
-
-    if lang_code in 'ab':
-        sentences = [s.text for s in doc.sents]
-    else:
-        # For non-english languages, Kokoro truncates long sentences, so we split them manually
-        sentences = []
-        for sent in list(doc.sents):
-            if len(sent.text) > 400:
-                print(f'Warning: Sentence too long ({len(sent.text)} chars), splitting into smaller sentences.')
-                sents = split_long_sentence(sent.text, 400)
-                sentences.extend(sents)
-            else:
-                sentences.append(sent.text)
-
-    for i, sent_text in enumerate(sentences):
+    for i, chunk in enumerate(chunk_text(text, voice, engine.max_chars)):
         if max_sentences and i > max_sentences: break
-        for gs, ps, audio in pipeline(sent_text, voice=voice, speed=speed, split_pattern=r'\n\n\n'):
-            audio_segments.append(audio)
+        audio_segments.append(engine.synthesize(chunk.text, chunk.voice, speed))
         if stats:
-            stats.processed_chars += len(sent_text)
+            stats.processed_chars += len(chunk.text)
             stats.progress = stats.processed_chars * 100 // stats.total_chars
             stats.eta = strfdelta((stats.total_chars - stats.processed_chars) / stats.chars_per_sec)
             if post_event: post_event('CORE_PROGRESS', stats=stats)
-            print(f'Estimated time remaining: {stats.eta}')
-            print('Progress:', f'{stats.progress}%\n')
     return audio_segments
 
 
-def gen_text(text, voice='af_heart', output_file='text.wav', speed=1, play=False):
-    lang_code = voice[:1]
-    pipeline = KPipeline(lang_code=lang_code, repo_id='hexgrad/Kokoro-82M')
+def gen_text(text, voice='af_heart', output_file='text.wav', speed=1, play=False, engine=None):
     load_spacy()
-    audio_segments = gen_audio_segments(pipeline, text, voice=voice, speed=speed);
+    audio_segments = gen_audio_segments(engine or KokoroEngine(), text, voice=voice, speed=speed)
     final_audio = np.concatenate(audio_segments)
     soundfile.write(output_file, final_audio, sample_rate)
     if play:
@@ -320,7 +336,7 @@ def strfdelta(tdelta, fmt='{D:02}d {H:02}h {M:02}m {S:02}s'):
     return f.format(fmt, **values)
 
 
-def create_m4b(chapter_files, filename, cover_image, output_folder):
+def create_m4b(chapter_files, filename, cover_image, output_folder, tempo=1.0):
     """Encode the chapter wavs into a single m4b with chapter markers and (optionally) the cover image, in one ffmpeg pass."""
     stem = Path(filename).stem
     wav_list_txt = Path(output_folder) / f'{stem}_wav_list.txt'
@@ -353,6 +369,7 @@ def create_m4b(chapter_files, filename, cover_image, output_folder):
         *cover_image_args,  # Cover image (if provided)
 
         '-map', '0:a',  # Map audio
+        *(['-filter:a', f'atempo={tempo}'] if tempo != 1.0 else []),  # Speed, for engines that can't change it
         '-c:a', 'aac',  # Built-in AAC encoder, available in every ffmpeg build
         '-b:a', '64k',  # Reduce bitrate for smaller size
 
@@ -377,14 +394,18 @@ def probe_duration(file_name):
     return float(proc.stdout.strip())
 
 
-def create_index_file(title, creator, chapter_mp3_files, output_folder):
+def create_index_file(title, creator, chapter_mp3_files, output_folder, chapter_titles=None, tempo=1.0):
     with open(Path(output_folder) / "chapters.txt", "w", encoding="utf-8") as f:
-        f.write(f";FFMETADATA1\ntitle={title}\nartist={creator}\n\n")
+        f.write(f";FFMETADATA1\ntitle={ffmeta_escape(title)}\nartist={ffmeta_escape(creator)}\n\n")
         start = 0
-        i = 0
-        for c in chapter_mp3_files:
-            duration = probe_duration(c)
-            end = start + (int)(duration * 1000)
-            f.write(f"[CHAPTER]\nTIMEBASE=1/1000\nSTART={start}\nEND={end}\ntitle=Chapter {i}\n\n")
-            i += 1
+        for i, c in enumerate(chapter_mp3_files):
+            duration = probe_duration(c) / tempo
+            end = start + int(duration * 1000)
+            name = chapter_titles[i] if chapter_titles else f'Chapter {i}'
+            f.write(f"[CHAPTER]\nTIMEBASE=1/1000\nSTART={start}\nEND={end}\ntitle={ffmeta_escape(name)}\n\n")
             start = end
+
+
+def ffmeta_escape(value):
+    """Escapes the characters that have a special meaning in ffmpeg metadata files."""
+    return re.sub(r'([=;#\\\n])', r'\\\1', str(value))
