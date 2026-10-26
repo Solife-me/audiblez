@@ -15,3 +15,4 @@ dist
 *.pdf
 *.m4b
 *.part
+!skills/*/scripts/*.sh
