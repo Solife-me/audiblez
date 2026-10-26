@@ -75,6 +75,32 @@ class VerifierTest(unittest.TestCase):
         self.assertIn('added', v.problem(tone(1), 'from an upper window, that he wore a blue coat')[1])
 
 
+class SplitRetryTest(unittest.TestCase):
+    def test_clip_that_keeps_looping_is_synthesized_in_shorter_pieces(self):
+        from audiblez.core import synthesize_clip
+        from audiblez.tts import TTSEngine
+
+        class LoopingEngine(TTSEngine):  # like phonon on one long sentence: always repeats itself
+            name = 'loop'
+            calls = []
+
+            def synthesize(self, text, voice, speed=1.0):
+                self.calls.append(text)
+                return tone(len(text) / 16)
+
+        class StrictVerifier:
+            def applies(self, engine, voice): return True
+            def problem(self, audio, text): return (5, 'added "he loves them"') if len(text) > 300 else None
+
+        text = ' '.join(f'Sentence number {i} is here, and it goes on for a while.' for i in range(12))
+        engine = LoopingEngine()
+        audio = synthesize_clip(engine, text, 'v', 1.0, GlitchDetector(StrictVerifier()))
+        self.assertEqual(engine.calls[:2], [text, text])  # two tries as it is
+        self.assertTrue(all(len(t) <= 300 for t in engine.calls[2:]))  # then shorter pieces
+        self.assertEqual(' '.join(engine.calls[2:]), text)  # covering all the text, once
+        self.assertGreater(len(audio), len(tone(len(text) / 16)))  # the pieces plus the pauses between them
+
+
 class DialogueChunkTest(unittest.TestCase):
     def cast(self, text, speakers):
         chars = [Character('Mrs. Bennet', 'female', voice='f1'), Character('Mr. Bennet', 'male', voice='m1')]

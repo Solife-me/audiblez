@@ -20,7 +20,7 @@ from tabulate import tabulate
 from pathlib import Path
 from string import Formatter
 from bs4 import BeautifulSoup
-from audiblez.text import chunk_text
+from audiblez.text import chunk_text, pack_sentences, split_sentences, pause_after_text
 from audiblez.audio import Leveler, GlitchDetector, trim, silence, split_at_pauses, longest_pause
 from audiblez.tts import TTSEngine, KokoroEngine, SAMPLE_RATE
 from ebooklib import epub
@@ -127,6 +127,9 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
     eta = strfdelta((stats.total_chars - stats.processed_chars) / stats.chars_per_sec)
     print(f'Estimated time remaining (assuming {stats.chars_per_sec} chars/sec): {eta}')
     engine.preflight(voice, speed)
+    if verifier is None and engine.name != 'kokoro' and engine.max_chars > UNVERIFIED_MAX_CHARS:
+        # Nothing will catch a TTS model looping on a long input, so read in pieces short enough not to trigger it
+        engine.max_chars = UNVERIFIED_MAX_CHARS
 
     chapter_wav_files = []
     chapter_titles = []
@@ -274,9 +277,15 @@ def synthesize_chunks(engine, chunks, speed, out_path, stats=None, post_event=No
     return True
 
 
-def synthesize_clip(engine, text, voice, speed, glitches, attempts=3):
+SPLIT_RETRY_CHARS = 300  # a clip that keeps failing is re-synthesized in pieces this long
+UNVERIFIED_MAX_CHARS = 400  # without verification: in testing, phonon never looped on inputs this short
+
+
+def synthesize_clip(engine, text, voice, speed, glitches, attempts=2, depth=0):
     """Synthesizes and trims one clip, regenerating it when the TTS output looks broken (a long silence, a wrong
-    length or, with a verifier, dropped or invented words). Keeps the best attempt."""
+    length or, with a verifier, dropped, repeated or invented words). If it still fails, the text is synthesized in
+    shorter pieces: TTS models loop on long inputs ("he loves them without works, he loves them without works"),
+    and resending the same text tends to fail the same way. Keeps the best attempt if nothing works."""
     best, best_score, best_problem = None, None, None
     verifier = glitches.verifier if glitches.verifier and glitches.verifier.applies(engine, voice) else None
     for attempt in range(attempts):
@@ -294,6 +303,18 @@ def synthesize_clip(engine, text, voice, speed, glitches, attempts=3):
         print(f'TTS glitch ({problem}) in "{text[:50]}...", regenerating ({attempt + 1}/{attempts})')
         if best is None or score < best_score:
             best, best_score, best_problem = audio, score, problem
+
+    if depth < 2 and len(text) > 60:
+        limit = SPLIT_RETRY_CHARS if len(text) > SPLIT_RETRY_CHARS * 1.2 else max(60, len(text) // 2)
+        pieces = pack_sentences(split_sentences(text), limit)
+        if len(pieces) > 1:
+            print(f'Synthesizing it in {len(pieces)} shorter pieces instead')
+            parts = []
+            for i, piece in enumerate(pieces):
+                parts.append(synthesize_clip(engine, piece, voice, speed, glitches, attempts, depth + 1))
+                if i < len(pieces) - 1:
+                    parts.append(silence(pause_after_text(piece)))
+            return np.concatenate(parts)
     print(f'Warning: keeping a clip that still has a problem ({best_problem}): "{text[:80]}..."')
     return best
 

@@ -42,8 +42,9 @@ class Verifier:
     def transcribe(self, audio):
         n = int(len(audio) * 16000 / SAMPLE_RATE)
         audio16 = np.interp(np.linspace(0, len(audio) - 1, n), np.arange(len(audio)), audio).astype(np.float32)
-        segments, _ = self.model.transcribe(audio16, beam_size=1, without_timestamps=True,
-                                            condition_on_previous_text=False, vad_filter=False)
+        # Timestamps must stay on: without them, faster-whisper loses whole 30-second windows of longer clips, which
+        # reported long paragraphs as missing their first half and hid repeats in that half
+        segments, _ = self.model.transcribe(audio16, beam_size=1, condition_on_previous_text=False, vad_filter=False)
         return ' '.join(s.text for s in segments)
 
     def problem(self, audio, text):
@@ -69,7 +70,7 @@ def create_verifier(cfg):
     if setting is False or setting == 'false':
         return None
     if not available():
-        if setting is True or setting == 'true':
-            print('Audio verification needs faster-whisper: pip install "audiblez[verify]". Continuing without it.')
+        print('Note: clips are not being checked for repeated, dropped or invented words, which TTS models sometimes '
+              'produce. To check them, install faster-whisper: pip install "audiblez[verify]"')
         return None
     return Verifier(cfg['tts'].get('verify_model', 'base.en'))

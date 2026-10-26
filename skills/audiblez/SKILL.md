@@ -118,7 +118,9 @@ Changing voices on the cast sheet never re-runs speaker detection; only the audi
   queue can time out. Check with `audiblez --list-voices`. If `.local` doesn't resolve on this machine, use the
   Mac's IP address in `~/.config/audiblez/config.toml`.
 - **Clip verification**: every clip is checked with a small speech recognizer (installed by the install script),
-  and clips where the TTS model dropped or invented words are regenerated. Lines like `TTS glitch (...)
+  and clips where the TTS model dropped, repeated or invented words are regenerated, in shorter pieces if retrying
+  doesn't help. If the user hears a repeated or missing passage, check the log for `faster-whisper` warnings (the
+  check wasn't running) or `keeping a clip that still has a problem` lines, which say which text failed. Lines like `TTS glitch (...)
   regenerating` in the log are this working, not an error. It roughly doubles the run time; `--no-verify` skips it.
 - **Footnotes and Roman numerals**: footnotes are skipped and Roman numerals read as numbers by default. If the user
   hears a footnote read aloud, a numeral spelled out, or a word wrongly read as a number in a particular book, re-run

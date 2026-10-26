@@ -141,9 +141,12 @@ of the silence models pad it with, levelled to the same loudness, and regenerate
 middle or a length that doesn't fit its text.
 
 With `pip install "audiblez[verify]"`, audiblez also listens to every clip with a small local speech recognizer
-(faster-whisper) and regenerates clips where the TTS model dropped or invented words (it happens: phonon once
-replaced half a sentence of a Spurgeon sermon with five seconds of silence). It's used automatically when installed
-and roughly doubles synthesis time; `--no-verify` or `verify = false` under `[tts]` turns it off.
+(faster-whisper) and regenerates clips where the TTS model dropped, repeated or invented words. It happens: phonon
+once replaced half a sentence of a Spurgeon sermon with five seconds of silence, and on a 495-character sentence
+with a repeated phrase ("he loved them without works, he loves them without works still") it repeated the phrase
+in every render. A clip that fails twice is re-synthesized in pieces of at most 300 characters, split at sentence
+and clause breaks, which breaks those loops. Verification is used automatically when installed and roughly doubles
+synthesis time; `--no-verify` or `verify = false` under `[tts]` turns it off.
 
 `--auto-narrator` asks the LLM about the author (or first-person narrator) and picks a narrator voice of the matching
 gender and accent, e.g. a British male voice for a Charles Spurgeon sermon. It only switches voice when the
