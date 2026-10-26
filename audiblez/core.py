@@ -68,7 +68,7 @@ def set_espeak_library():
 
 def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.',
          max_chapters=None, max_sentences=None, selected_chapters=None, post_event=None, engine=None,
-         characters=False, llm=None, review=True, auto_narrator=False, prime_replies=False):
+         characters=False, llm=None, review=True, auto_narrator=False, prime_replies=False, verifier=None):
     if post_event: post_event('CORE_STARTED')
     load_spacy()
     if output_folder != '.':
@@ -151,7 +151,8 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
                       + cast.chunks(chapter.extracted_text, engine.max_chars, prime_replies=prime_replies))
         else:
             chunks = chunk_text(f'{intro}\n\n{text}' if intro else text, voice, engine.max_chars)
-        if synthesize_chunks(engine, chunks, speed, chapter_wav_path, stats, post_event=post_event, max_chunks=max_sentences):
+        if synthesize_chunks(engine, chunks, speed, chapter_wav_path, stats, post_event=post_event, max_chunks=max_sentences,
+                             verifier=verifier):
             chapter_wav_files.append(chapter_wav_path)
             chapter_titles.append(chapter_title(chapter, i))
             delta_seconds = time.time() - start_time
@@ -226,7 +227,7 @@ def print_selected_chapters(document_chapters, chapters):
         for i, c in enumerate(document_chapters, start=1)
     ], headers=['#', 'Chapter', 'Text Length', 'Selected', 'First words']))
 
-def synthesize_chunks(engine, chunks, speed, out_path, stats=None, post_event=None, max_chunks=None):
+def synthesize_chunks(engine, chunks, speed, out_path, stats=None, post_event=None, max_chunks=None, verifier=None):
     """Synthesizes the chunks straight into a wav file, so memory use doesn't grow with the chapter length.
     Each clip is trimmed of the model's padding silence, levelled to the same loudness per voice and followed by
     a pause that fits its punctuation. Writes to a .part file first so an interrupted chapter is redone on the next
@@ -234,7 +235,7 @@ def synthesize_chunks(engine, chunks, speed, out_path, stats=None, post_event=No
     out_path = Path(out_path)
     tmp_path = out_path.with_name(out_path.name + '.part')
     leveler = Leveler()
-    glitches = GlitchDetector()
+    glitches = GlitchDetector(verifier)
     joint_pieces = {}  # joint texts -> trimmed audio pieces, for chunks synthesized as one utterance
     samples_written = 0
     with soundfile.SoundFile(tmp_path, 'w', samplerate=sample_rate, channels=1, subtype='PCM_16', format='WAV') as f:
@@ -271,17 +272,25 @@ def synthesize_chunks(engine, chunks, speed, out_path, stats=None, post_event=No
 
 
 def synthesize_clip(engine, text, voice, speed, glitches, attempts=3):
-    """Synthesizes and trims one clip, regenerating it when the TTS output looks broken. Keeps the best attempt."""
-    best, best_problem = None, None
+    """Synthesizes and trims one clip, regenerating it when the TTS output looks broken (a long silence, a wrong
+    length or, with a verifier, dropped or invented words). Keeps the best attempt."""
+    best, best_score, best_problem = None, None, None
+    verifier = glitches.verifier if glitches.verifier and glitches.verifier.applies(engine, voice) else None
     for attempt in range(attempts):
         audio = trim(engine.synthesize(text, voice, speed))
-        problem = glitches.problem(audio, text, voice)
+        problem, score = glitches.problem(audio, text, voice), 0
+        if problem:
+            score = 1000 + longest_pause(audio)
+        elif verifier:
+            wrong = verifier.problem(audio, text)
+            if wrong:
+                score, problem = wrong
         if problem is None:
             glitches.accept(audio, text, voice)
             return audio
         print(f'TTS glitch ({problem}) in "{text[:50]}...", regenerating ({attempt + 1}/{attempts})')
-        if best is None or longest_pause(audio) < longest_pause(best):
-            best, best_problem = audio, problem
+        if best is None or score < best_score:
+            best, best_score, best_problem = audio, score, problem
     print(f'Warning: keeping a clip that still has a problem ({best_problem}): "{text[:80]}..."')
     return best
 
@@ -294,7 +303,15 @@ def synthesize_joint(engine, chunk, speed, glitches=None):
     texts = [t.strip(' “”"‘’') for t in chunk.joint]
     separate = [synthesize_clip(engine, t, chunk.voice, speed, glitches) for t in texts]
     joint = synthesize_clip(engine, ' '.join(texts), chunk.voice, speed, glitches)
-    pieces = split_at_pauses(joint, [max(len(p), 1) for p in separate])
+    # A context line that ends a sentence is followed by a sentence pause; insist on one there, so the cut can't
+    # land in the short gap after the first word of the line that follows (“I | am sick of Mr. Bingley”)
+    min_pauses = [0.15 if chunk.joint_context and i == 0 and texts[0].rstrip(' ”"’').endswith(('.', '!', '?', '…')) else 0.05
+                  for i in range(len(texts) - 1)]
+    pieces = split_at_pauses(joint, [max(len(p), 1) for p in separate], min_pauses=min_pauses)
+    verifier = glitches.verifier if glitches.verifier and glitches.verifier.applies(engine, chunk.voice) else None
+    if pieces is not None and verifier and any(verifier.problem(piece, text) for i, (piece, text) in enumerate(zip(pieces, texts))
+                                               if not (chunk.joint_context and i == 0)):
+        pieces = None  # a cut landed in the wrong place
     if pieces is None:
         pieces = separate
     pieces = [trim(p) for p in pieces]

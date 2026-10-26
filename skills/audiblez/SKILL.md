@@ -56,7 +56,7 @@ user's Ollama Mac, roughly 50x faster than real time), or by Kokoro running loca
 | Character voices: detect cast | `audiblez BOOK -o OUT --characters` (writes `OUT/<stem>.cast.toml`, then stops) |
 | Character voices: synthesize | run the same `--characters` command again |
 | Character voices in one go | `audiblez BOOK -o OUT --characters --no-review` |
-| More conversational replies | add `--prime-replies` to a `--characters` run |
+| Faster, without checking each clip | add `--no-verify` |
 | Use a cloud LLM for this run | add `--llm-model kimi-k3:cloud` |
 | Audition every voice | `audiblez --audition-voices -o OUT` |
 
@@ -91,6 +91,9 @@ The result is `OUT/<stem>.m4b`, where `<stem>` is the book's file name without t
 - **TTS server busy or unreachable**: the Ollama Mac also runs other models. Requests are retried, but a long
   queue can time out. Check with `audiblez --list-voices`. If `.local` doesn't resolve on this machine, use the
   Mac's IP address in `~/.config/audiblez/config.toml`.
+- **Clip verification**: every clip is checked with a small speech recognizer (installed by the install script),
+  and clips where the TTS model dropped or invented words are regenerated. Lines like `TTS glitch (...)
+  regenerating` in the log are this working, not an error. It roughly doubles the run time; `--no-verify` skips it.
 - **Speed**: phonon only speaks at 1.0. Other speeds are applied when the m4b is made, which works fine.
 - **Wrong chapters picked**: the log prints a table of all sections with ✅ on the selected ones. PDFs use their
   bookmarks, or larger-font headings when there are none. Front matter (cover, contents) is skipped. Long

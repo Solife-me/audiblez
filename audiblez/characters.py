@@ -464,6 +464,13 @@ class Cast:
                     g, pos = member[idx]
                     texts, has_context = groups[g]
                     paragraph_chunks.append(Chunk(part, voice, joint=texts, joint_index=pos, joint_context=has_context))
+                elif (prime_replies and not is_quote and idx > 0 and voiced[idx - 1][2] and voiced[idx - 1][0] != voice
+                      and part[:1].islower() and len(part) <= max_chars):
+                    # A dialogue tag ("said her mother resentfully") continues the quote's sentence. Spoken alone,
+                    # TTS models mangle its first word ("said" comes out as "sighed"), so the narrator says the end of
+                    # the quote first and that part is cut off again.
+                    context = last_clause(voiced[idx - 1][1])
+                    paragraph_chunks.append(Chunk(part, voice, joint=(context, part), joint_index=1, joint_context=True))
                 else:
                     pieces = [part] if len(part) <= max_chars else pack_sentences(split_sentences(part), max_chars)
                     paragraph_chunks += [Chunk(p, voice) for p in pieces]
@@ -474,6 +481,16 @@ class Cast:
                 paragraph_chunks[-1].pause_after = DIALOGUE_PARAGRAPH_PAUSE if has_dialogue else PARAGRAPH_PAUSE
             chunks += paragraph_chunks
         return chunks
+
+
+def last_clause(text, max_chars=80):
+    """The end of a quote, keeping its final punctuation (“My dear Mr. Bennet,” -> 'My dear Mr. Bennet,')."""
+    text = text.strip(' “”"‘’')
+    sentences = [s for s in re.split(r'(?<=[.!?…])\s+', text) if s]
+    last = sentences[-1] if sentences else text
+    if len(last) > max_chars:
+        last = last[-max_chars:].split(' ', 1)[-1]
+    return last
 
 
 def last_sentence(text, max_chars=120):

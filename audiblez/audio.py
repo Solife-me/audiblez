@@ -75,10 +75,11 @@ def silence(seconds):
     return np.zeros(int(seconds * SAMPLE_RATE), dtype=np.float32)
 
 
-def split_at_pauses(audio, weights, min_pause=0.05, tolerance=0.12):
+def split_at_pauses(audio, weights, min_pause=0.05, tolerance=0.12, min_pauses=None):
     """Cuts one synthesized utterance into len(weights) pieces at the pauses closest to where each piece should end,
     judging by its share of the weights (best: the duration of each part spoken on its own). Returns None when a clear pause can't be found near every expected cut,
-    so the caller can fall back to synthesizing the pieces separately."""
+    so the caller can fall back to synthesizing the pieces separately. min_pauses can require a longer pause at
+    particular cuts, e.g. a sentence break after a context line, so a cut never lands in the gap between two words."""
     env = envelope(audio)
     if len(env) == 0 or len(weights) < 2:
         return None
@@ -95,13 +96,15 @@ def split_at_pauses(audio, weights, min_pause=0.05, tolerance=0.12):
         return None
     first, last = voiced[0], voiced[-1]
     runs = [(a, b) for a, b in runs if a > first and b < last and (b - a + 1) * 0.01 >= min_pause]
+    min_pauses = min_pauses or [min_pause] * (len(weights) - 1)
     span = last - first
     total = float(sum(weights))
     cuts, prev, acc = [], first, 0.0
-    for w in weights[:-1]:
+    for i, w in enumerate(weights[:-1]):
         acc += w
         expected = first + span * acc / total
-        candidates = [(a, b) for a, b in runs if (a + b) / 2 > prev and abs((a + b) / 2 - expected) <= tolerance * span]
+        candidates = [(a, b) for a, b in runs if (a + b) / 2 > prev and abs((a + b) / 2 - expected) <= tolerance * span
+                      and (b - a + 1) * 0.01 >= min_pauses[i]]
         if not candidates:
             return None
         # prefer the longest pause, unless a nearer one is almost as long
@@ -137,8 +140,9 @@ class GlitchDetector:
     long for its text compared with how fast that voice usually speaks (dropped or repeated words)."""
     MAX_PAUSE = 1.6
 
-    def __init__(self):
+    def __init__(self, verifier=None):
         self.rates = {}  # voice -> (chars, seconds) of clips that passed
+        self.verifier = verifier  # optional audiblez.verify.Verifier, which also listens for dropped/invented words
 
     def problem(self, audio, text, voice):
         seconds = len(audio) / SAMPLE_RATE

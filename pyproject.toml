@@ -46,6 +46,9 @@ gui = [
     "wxpython (>=4.3.2,<5.0.0)",
     "pillow (>=11.0.0)",
 ]
+verify = [
+    "faster-whisper (>=1.2.1,<2.0.0)",
+]
 
 [project.scripts]
 audiblez = "audiblez.cli:cli_main"

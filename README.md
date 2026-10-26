@@ -114,10 +114,24 @@ To make the cast sound like a conversation rather than clips stitched together, 
 TTS models pad it with and followed by a pause that fits (short after "…,” said she", a turn-taking gap between
 speakers), and every clip is levelled to the same loudness. A quote split by a dialogue tag ("“My dear,” said she,
 “have you heard?”") is spoken as one utterance and cut at its pause, so it keeps its intonation.
-`--prime-replies` (or `prime_replies = true` under `[characters]` in the config) goes further: each reply is
-synthesized right after the line it answers, in the replying voice, and that line is then cut off, so the reply is
-spoken as a response. Clips where the TTS model glitches (a long silence mid-speech, or dropped words) are
-regenerated automatically.
+Replies are also primed: each reply is synthesized right after the line it answers, in the replying voice, and that
+line is then cut off, so the reply is spoken as a response. Dialogue tags are primed the same way with the end of the
+quote before them, since TTS models mangle a fragment like "said her mother" spoken on its own
+(`--no-prime-replies`, or `prime_replies = false` under `[characters]`, turns this off). Characters with the most
+lines get the most expressive voices of their gender: `--audition-voices` measures each voice's pitch variation
+and prints it as `expressiveness` for the config.
+
+## Speech clean-up and verification
+
+Before speech, abbreviations that TTS models misread are spelled out (Mr., Mrs., Dr., St., &c.), old spellings
+are modernized (to-morrow, to-day) and Roman numerals after Chapter/Book/Part become numbers. Every clip is trimmed
+of the silence models pad it with, levelled to the same loudness, and regenerated if it has a long silence in the
+middle or a length that doesn't fit its text.
+
+With `pip install "audiblez[verify]"`, audiblez also listens to every clip with a small local speech recognizer
+(faster-whisper) and regenerates clips where the TTS model dropped or invented words (it happens: phonon once
+replaced half a sentence of a Spurgeon sermon with five seconds of silence). It's used automatically when installed
+and roughly doubles synthesis time; `--no-verify` or `verify = false` under `[tts]` turns it off.
 
 `--auto-narrator` asks the LLM about the author (or first-person narrator) and picks a narrator voice of the matching
 gender and accent, e.g. a British male voice for a Charles Spurgeon sermon. It only switches voice when the
@@ -214,10 +228,11 @@ To do so, you can use `--pick` to interactively choose the chapters to convert (
 For all the options available, you can check the help page `audiblez --help`:
 
 ```
-usage: audiblez [-h] [-v VOICE] [-p] [-s SPEED] [-c] [-o FOLDER] [--max-chapters N]
+usage: audiblez [-h] [-v VOICE] [-p] [-s SPEED] [-c] [-o FOLDER] [--no-verify] [--max-chapters N]
                 [--provider PROVIDER] [--model MODEL] [--base-url URL] [--list-voices]
                 [--config FILE] [--init-config] [--audition-voices] [--characters] [--no-review]
-                [--auto-narrator] [--llm-provider LLM_PROVIDER] [--llm-model LLM_MODEL]
+                [--prime-replies | --no-prime-replies] [--auto-narrator]
+                [--llm-provider LLM_PROVIDER] [--llm-model LLM_MODEL]
                 [file_path]
 
 positional arguments:
@@ -234,6 +249,8 @@ options:
   -c, --cuda            Use GPU via Cuda in Torch if available
   -o FOLDER, --output FOLDER
                         Output folder for the audiobook and temporary files
+  --no-verify           Skip checking each clip with speech recognition (used when faster-whisper
+                        is installed: pip install "audiblez[verify]")
   --max-chapters N      Only read the first N selected chapters (handy for a quick test)
 
 TTS provider:
@@ -254,6 +271,10 @@ character voices (needs an LLM, see [llm] in the config):
                         synthesize
   --no-review           With --characters, synthesize right away without stopping to review the
                         cast sheet
+  --prime-replies, --no-prime-replies
+                        Synthesize each reply right after the line it answers (then cut that off),
+                        so it flows as a response (default: on; [characters] prime_replies in the
+                        config)
   --auto-narrator       Pick the narrator voice from the author's or narrator's gender and origin
                         (e.g. a British male voice for Spurgeon)
   --llm-provider LLM_PROVIDER

@@ -53,6 +53,28 @@ class GlitchTest(unittest.TestCase):
         self.assertIn('usually takes', g.problem(tone(1.5), 'x' * 80, 'v'))  # words were dropped
 
 
+class VerifierTest(unittest.TestCase):
+    def verifier(self, heard):
+        from audiblez.verify import Verifier
+        v = Verifier()
+        v.transcribe = lambda audio: heard
+        return v
+
+    def test_recognizer_slips_are_ignored(self):
+        v = self.verifier('Tomorrow, Fortnite, said Mr. Bennett to his wife.')
+        self.assertIsNone(v.problem(tone(1), 'To-morrow fortnight, said Mister Bennet to his wife.'))
+
+    def test_dropped_words_are_caught(self):
+        v = self.verifier('for after all, Mr. Self.')
+        wrong, detail = v.problem(tone(1), 'for after all, Mister Self is the worst enemy a Christian has.')
+        self.assertEqual(wrong, 7)  # "is the worst enemy a christian has"
+        self.assertIn('dropped', detail)
+
+    def test_invented_words_are_caught(self):
+        v = self.verifier('from an upper window, that he had to be at the end of the city, that he wore a blue coat')
+        self.assertIn('added', v.problem(tone(1), 'from an upper window, that he wore a blue coat')[1])
+
+
 class DialogueChunkTest(unittest.TestCase):
     def cast(self, text, speakers):
         chars = [Character('Mrs. Bennet', 'female', voice='f1'), Character('Mr. Bennet', 'male', voice='m1')]
@@ -66,6 +88,14 @@ class DialogueChunkTest(unittest.TestCase):
         self.assertEqual((chunks[0].joint_index, chunks[2].joint_index), (0, 1))
         self.assertIsNone(chunks[1].joint)
         self.assertLess(chunks[0].pause(), 0.2)  # “My dear Mr. Bennet,” flows straight into the tag
+
+    def test_dialogue_tag_is_primed_with_the_end_of_the_quote(self):
+        text = '“My dear Mr. Bennet,” said his lady to him one day, “have you heard?”'
+        chunks = self.cast(text, ['Mrs. Bennet', 'Mrs. Bennet']).chunks(text, 1000, prime_replies=True)
+        tag = chunks[1]
+        self.assertEqual(tag.voice, 'narr')
+        self.assertEqual(tag.joint, ('My dear Mister Bennet,', 'said his lady to him one day,'))
+        self.assertTrue(tag.joint_context)
 
     def test_prime_replies_adds_the_line_being_answered(self):
         text = '“Is he married or single?”\n“Oh, single, my dear!”'
