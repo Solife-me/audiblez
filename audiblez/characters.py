@@ -15,15 +15,15 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from audiblez.text import Chunk, split_paragraphs, pack_sentences, split_sentences, PARAGRAPH_PAUSE, \
-    DIALOGUE_PARAGRAPH_PAUSE
+from audiblez.text import Chunk, split_paragraphs, pack_sentences, split_sentences, normalize_for_speech, \
+    PARAGRAPH_PAUSE, DIALOGUE_PARAGRAPH_PAUSE
 
 NARRATOR = 'narrator'
 UNKNOWN = 'unknown'
 WINDOW_CHARS = 3000
 CONTEXT_PARAGRAPHS = 3
-MALE_TITLES = {'mr', 'mister', 'sir', 'lord', 'master', 'king', 'prince', 'duke', 'father', 'brother', 'uncle', 'monsieur', 'herr', 'señor'}
-FEMALE_TITLES = {'mrs', 'miss', 'ms', 'lady', 'madam', 'madame', 'dame', 'queen', 'princess', 'duchess', 'mother', 'sister', 'aunt', 'mademoiselle', 'frau', 'señora'}
+MALE_TITLES = {'mr', 'mister', 'messrs', 'sir', 'lord', 'master', 'king', 'prince', 'duke', 'father', 'brother', 'uncle', 'monsieur', 'herr', 'señor'}
+FEMALE_TITLES = {'mrs', 'missus', 'miss', 'ms', 'miz', 'lady', 'madam', 'madame', 'dame', 'queen', 'princess', 'duchess', 'mother', 'sister', 'aunt', 'mademoiselle', 'frau', 'señora'}
 NEUTRAL_TITLES = {'dr', 'doctor', 'professor', 'prof', 'captain', 'colonel', 'general', 'rev', 'reverend', 'the', 'old', 'young', 'little'}
 ACCENTS = ['american', 'british', 'irish', 'scottish', 'welsh', 'australian', 'canadian', 'indian', 'south african',
            'french', 'german', 'italian', 'spanish', 'other']
@@ -331,8 +331,9 @@ def eligible_voices(voices, narrator_voice, engine_name):
 
 
 def assign_voices(characters, voices, narrator_voice, engine_name, accent=None):
-    """Gives each character (most lines first) the least used voice of their gender, preferring the book's accent
-    and a matching age. Characters of unknown gender keep the narrator's voice."""
+    """Gives each character (most lines first) the least used voice of their gender, preferring the book's accent,
+    a matching age and then the most expressive voice, so the characters who talk most get the liveliest voices.
+    Characters of unknown gender keep the narrator's voice."""
     pool = eligible_voices(voices, narrator_voice, engine_name)
     used = Counter()
     for c in sorted(characters, key=lambda c: -c.lines):
@@ -345,7 +346,8 @@ def assign_voices(characters, voices, narrator_voice, engine_name, accent=None):
             continue
         def score(v):
             age_match = (getattr(v, 'age', 'adult') == c.age) or (c.age == 'child' and getattr(v, 'age', '') == 'young')
-            return (used[v.name], 0 if accent and v.accent == accent else 1, 0 if age_match else 1)
+            return (used[v.name], 0 if accent and v.accent == accent else 1, 0 if age_match else 1,
+                    -getattr(v, 'expressiveness', 0.0))
         best = min(candidates, key=score)
         c.voice = best.name
         used[best.name] += 1
@@ -435,7 +437,7 @@ class Cast:
                     voiced[-1][2] = voiced[-1][2] or s.is_quote
                 else:
                     voiced.append([voice, s.text, s.is_quote])
-            voiced = [(v, t.strip(), q) for v, t, q in voiced if re.search(r'\w', t)]  # drop stray punctuation
+            voiced = [(v, normalize_for_speech(t.strip()), q) for v, t, q in voiced if re.search(r'\w', t)]  # drop stray punctuation
             has_dialogue = any(q for _, _, q in voiced)
 
             # Group each speaker's quotes that are separated only by a short narrator tag

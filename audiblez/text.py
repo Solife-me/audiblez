@@ -56,6 +56,34 @@ def split_paragraphs(text):
     return [p.strip() for p in re.split(r'\n+', text) if p.strip()]
 
 
+# Abbreviations TTS models misread ("Mrs." comes out as anything from "Mrs. Smith" to "M-R-S"), and whose period
+# would otherwise be taken for the end of a sentence. Only expanded where they can only mean one thing.
+ABBREVIATIONS = [
+    (r'\bMrs\.(?=\s)', 'Missus'), (r'\bMr\.(?=\s)', 'Mister'), (r'\bMessrs\.(?=\s)', 'Messieurs'),
+    (r'\bMs\.(?=\s+[A-Z])', 'Miz'), (r'\bDr\.(?=\s+[A-Z])', 'Doctor'), (r'\bSt\.(?=\s+[A-Z])', 'Saint'),
+    (r'\bRev\.(?=\s+[A-Z])', 'Reverend'), (r'\bCapt\.(?=\s+[A-Z])', 'Captain'), (r'\bCol\.(?=\s+[A-Z])', 'Colonel'),
+    (r'\bProf\.(?=\s+[A-Z])', 'Professor'), (r'\bMt\.(?=\s+[A-Z])', 'Mount'), (r'&c\.', 'et cetera.'), (r'&c\b', 'et cetera'),
+]
+ARCHAIC = re.compile(r'\b([Tt])o-(morrow|day|night)\b')  # to-morrow, to-day, to-night (old spellings)
+NUMBERED = re.compile(r'\b(Chapter|Book|Part|Volume|Act|Scene|Canto|Letter|Section|Sermon|Psalm)\s+([IVXLC]+)\b(?![\'’]\w)')
+ROMAN = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100}
+
+
+def roman_to_int(numeral):
+    total = 0
+    for i, ch in enumerate(numeral):
+        value = ROMAN[ch]
+        total += -value if i + 1 < len(numeral) and ROMAN[numeral[i + 1]] > value else value
+    return total
+
+
+def normalize_for_speech(text):
+    for pattern, replacement in ABBREVIATIONS:
+        text = re.sub(pattern, replacement, text)
+    text = ARCHAIC.sub(lambda m: m.group(1) + 'o' + m.group(2), text)
+    return NUMBERED.sub(lambda m: f'{m.group(1)} {roman_to_int(m.group(2))}', text)
+
+
 def split_sentences(paragraph):
     nlp = sentencizer()
     if len(paragraph) > nlp.max_length:
@@ -100,6 +128,7 @@ def pack_sentences(sentences, max_chars):
 
 
 def chunk_paragraph(paragraph, voice, max_chars):
+    paragraph = normalize_for_speech(paragraph)
     if len(paragraph) <= max_chars:
         pieces = [paragraph]
     else:

@@ -21,6 +21,7 @@ class VoiceInfo:
     accent: str = 'unknown'  # american | british | ...
     age: str = 'adult'
     style: str = ''  # 'character' for creature/novelty voices that shouldn't be cast as ordinary people
+    expressiveness: float = 0.0  # pitch variation in semitones (from --audition-voices); livelier voices go to main characters
 
 
 class TTSEngine:

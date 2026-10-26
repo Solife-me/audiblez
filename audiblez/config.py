@@ -12,7 +12,7 @@ from pathlib import Path
 DEFAULTS = {
     'tts': {'provider': 'kokoro', 'voice': 'af_sky', 'speed': 1.0},
     'llm': {'provider': None, 'model': None},
-    'characters': {'prime_replies': False},
+    'characters': {'prime_replies': True},
     'providers': {'kokoro': {'type': 'kokoro'}},
 }
 

@@ -20,25 +20,48 @@ def envelope(audio):
 
 
 def voiced_threshold(env):
+    """Level of clearly voiced speech; used to measure loudness."""
     loud = env[env > 0.005]
     return max(0.006, 0.1 * float(np.median(loud))) if len(loud) else 0.006
 
 
-def trim(audio, margin=0.03):
-    """Removes leading/trailing silence, keeping a small margin, with short fades so cuts never click."""
+def silence_threshold(env):
+    """Level just above the clip's own noise floor. Anything louder is sound, including the quiet start of
+    fricatives like the f in "fortnight" or the h in "he", which a speech-level threshold would cut off."""
+    if len(env) == 0:
+        return 0.0008
+    loud = env[env > 0.005]
+    ceiling = 0.3 * float(np.median(loud)) if len(loud) else 0.0008  # for clips with no silence to measure
+    return max(min(8 * float(np.percentile(env, 5)), ceiling), 0.0008)
+
+
+def sounding(env):
+    """Frames that are sound, ignoring isolated blips (some models start every clip with a tiny click)."""
+    above = env > silence_threshold(env)
+    steady = above.copy()
+    steady[:-2] = above[:-2] & above[1:-1] & above[2:]
+    steady[-2:] = False
+    # extend each steady run back over the two frames that started it
+    for shift in (1, 2):
+        steady[:-shift] |= steady[shift:] & above[:-shift]
+    return steady
+
+
+def trim(audio, lead=0.04, tail=0.06):
+    """Removes the silence before and after the speech, keeping a small margin, with short fades so cuts never
+    click. Only true silence is removed: soft consonants at the edges are kept."""
     env = envelope(audio)
     if len(env) == 0:
         return audio
-    voiced = np.nonzero(env > voiced_threshold(env))[0]
-    if len(voiced) == 0:
+    sound = np.nonzero(sounding(env))[0]
+    if len(sound) == 0:
         return audio[:0]
-    pad = int(margin * SAMPLE_RATE)
-    start = max(0, voiced[0] * FRAME - pad)
-    end = min(len(audio), (voiced[-1] + 1) * FRAME + pad)
+    start = max(0, sound[0] * FRAME - int(lead * SAMPLE_RATE))
+    end = min(len(audio), (sound[-1] + 1) * FRAME + int(tail * SAMPLE_RATE))
     return fade(audio[start:end])
 
 
-def fade(audio, seconds=0.008):
+def fade(audio, seconds=0.004):
     n = min(int(seconds * SAMPLE_RATE), len(audio) // 2)
     if n:
         audio = audio.copy()
@@ -59,7 +82,7 @@ def split_at_pauses(audio, weights, min_pause=0.05, tolerance=0.12):
     env = envelope(audio)
     if len(env) == 0 or len(weights) < 2:
         return None
-    quiet = env < voiced_threshold(env)
+    quiet = ~sounding(env)  # cut only inside true silence, never through a soft consonant
     runs, start = [], None  # (first_frame, last_frame) of each quiet run inside the utterance
     for i, q in enumerate(quiet):
         if q and start is None:
@@ -103,7 +126,7 @@ def longest_pause(audio):
     if len(env) == 0:
         return 0.0
     longest = run = 0
-    for q in env < voiced_threshold(env):
+    for q in ~sounding(env):
         run = run + 1 if q else 0
         longest = max(longest, run)
     return longest * FRAME / SAMPLE_RATE

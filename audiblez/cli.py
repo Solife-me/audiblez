@@ -38,7 +38,7 @@ def cli_main():
     cast = parser.add_argument_group('character voices (needs an LLM, see [llm] in the config)')
     cast.add_argument('--characters', action='store_true', help='Read each character\'s dialogue in their own voice. The first run detects the characters and writes <book>.cast.toml for review; run again to synthesize')
     cast.add_argument('--no-review', action='store_true', help='With --characters, synthesize right away without stopping to review the cast sheet')
-    cast.add_argument('--prime-replies', action='store_true', default=None, help='Synthesize each reply right after the line it answers (then cut that off), for a more conversational tone. Also [characters] prime_replies in the config')
+    cast.add_argument('--prime-replies', action=argparse.BooleanOptionalAction, default=None, help='Synthesize each reply right after the line it answers (then cut that off), so it flows as a response (default: on; [characters] prime_replies in the config)')
     cast.add_argument('--auto-narrator', action='store_true', help='Pick the narrator voice from the author\'s or narrator\'s gender and origin (e.g. a British male voice for Spurgeon)')
     cast.add_argument('--llm-provider', default=None, help='Provider for the LLM (default: [llm] provider in the config)')
     cast.add_argument('--llm-model', default=None, help='LLM model, e.g. gemma4:26b-mlx or kimi-k3:cloud (default: [llm] model in the config)')
