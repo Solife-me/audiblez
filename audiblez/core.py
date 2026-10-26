@@ -17,7 +17,6 @@ import shutil
 import subprocess
 import platform
 import re
-from io import StringIO
 from types import SimpleNamespace
 from tabulate import tabulate
 from pathlib import Path
@@ -321,25 +320,15 @@ def strfdelta(tdelta, fmt='{D:02}d {H:02}h {M:02}m {S:02}s'):
     return f.format(fmt, **values)
 
 
-def concat_wavs_with_ffmpeg(chapter_files, output_folder, filename):
-    wav_list_txt = Path(output_folder) / filename.replace('.epub', '_wav_list.txt')
-    with open(wav_list_txt, 'w') as f:
-        for wav_file in chapter_files:
-            f.write(f"file '{wav_file}'\n")
-    concat_file_path = Path(output_folder) / filename.replace('.epub', '.tmp.mp4')
-    subprocess.run([
-        'ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', wav_list_txt,
-        # '-c', 'copy',
-        '-c:a',  'libfdk_aac',
-        '-b:a',  '192k',
-        concat_file_path])
-    Path(wav_list_txt).unlink()
-    return concat_file_path
-
-
 def create_m4b(chapter_files, filename, cover_image, output_folder):
-    concat_file_path = concat_wavs_with_ffmpeg(chapter_files, output_folder, filename)
-    final_filename = Path(output_folder) / filename.replace('.epub', '.m4b')
+    """Encode the chapter wavs into a single m4b with chapter markers and (optionally) the cover image, in one ffmpeg pass."""
+    stem = Path(filename).stem
+    wav_list_txt = Path(output_folder) / f'{stem}_wav_list.txt'
+    with open(wav_list_txt, 'w', encoding='utf-8') as f:
+        for wav_file in chapter_files:
+            escaped = str(Path(wav_file).resolve()).replace("'", "'\\''")
+            f.write(f"file '{escaped}'\n")
+    final_filename = Path(output_folder) / f'{stem}.m4b'
     chapters_txt_path = Path(output_folder) / "chapters.txt"
     print('Creating M4B file...')
 
@@ -359,25 +348,27 @@ def create_m4b(chapter_files, filename, cover_image, output_folder):
     proc = subprocess.run([
         'ffmpeg',
         '-y',  # Overwrite output
-        
-        '-i', f'{concat_file_path}',  # Input audio
+        '-f', 'concat', '-safe', '0', '-i', f'{wav_list_txt}',  # Input audio (all chapter wavs)
         '-i', f'{chapters_txt_path}',  # Input chapters
         *cover_image_args,  # Cover image (if provided)
 
         '-map', '0:a',  # Map audio
-        '-c:a', 'aac',  # Convert to AAC
+        '-c:a', 'aac',  # Built-in AAC encoder, available in every ffmpeg build
         '-b:a', '64k',  # Reduce bitrate for smaller size
 
-        '-map_metadata', '1', # Map metadata
+        '-map_metadata', '1',  # Map metadata
+        '-map_chapters', '1',  # Map chapter markers
 
         '-f', 'mp4',  # Output as M4B
         f'{final_filename}'  # Output file
     ])
 
-    Path(concat_file_path).unlink()
+    wav_list_txt.unlink()
     if proc.returncode == 0:
         print(f'{final_filename} created. Enjoy your audiobook.')
         print('Feel free to delete the intermediary .wav chapter files, the .m4b is all you need.')
+    else:
+        print(f'ffmpeg failed to create {final_filename} (exit code {proc.returncode})')
 
 
 def probe_duration(file_name):
@@ -397,24 +388,3 @@ def create_index_file(title, creator, chapter_mp3_files, output_folder):
             f.write(f"[CHAPTER]\nTIMEBASE=1/1000\nSTART={start}\nEND={end}\ntitle=Chapter {i}\n\n")
             i += 1
             start = end
-
-
-def unmark_element(element, stream=None):
-    """auxiliarry function to unmark markdown text"""
-    if stream is None:
-        stream = StringIO()
-    if element.text:
-        stream.write(element.text)
-    for sub in element:
-        unmark_element(sub, stream)
-    if element.tail:
-        stream.write(element.tail)
-    return stream.getvalue()
-
-
-def unmark(text):
-    """Unmark markdown text"""
-    Markdown.output_formats["plain"] = unmark_element  # patching Markdown
-    __md = Markdown(output_format="plain")
-    __md.stripTopLevelTags = False
-    return __md.convert(text)
