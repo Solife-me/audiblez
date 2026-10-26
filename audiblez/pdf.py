@@ -59,7 +59,7 @@ class PdfChapter:
         return self.title
 
 
-def load_pdf(file_path, max_section_chars=MAX_SECTION_CHARS):
+def load_pdf(file_path, max_section_chars=MAX_SECTION_CHARS, skip_footnotes=True):
     from pdfminer.pdfdocument import PDFDocument
     from pdfminer.pdfparser import PDFParser
     from pdfminer.pdfpage import PDFPage
@@ -71,10 +71,10 @@ def load_pdf(file_path, max_section_chars=MAX_SECTION_CHARS):
         page_index = {page.pageid: i for i, page in enumerate(PDFPage.create_pages(doc))}
         outline = read_outline(doc, page_index)
 
-    lines = extract_lines(file_path, num_pages=len(page_index))
+    lines = extract_lines(file_path, num_pages=len(page_index), skip_footnotes=skip_footnotes)
     lines = remove_headers_and_footers(lines, len(page_index))
     body_size = median_font_size(lines)
-    paragraphs = build_paragraphs(lines, body_size)
+    paragraphs = build_paragraphs(lines, body_size, skip_footnotes=skip_footnotes)
     chapters = split_into_chapters(paragraphs, outline, max_section_chars)
     for i, c in enumerate(chapters):
         c.chapter_index = i
@@ -131,7 +131,7 @@ def read_outline(doc, page_index):
     return []
 
 
-def extract_lines(file_path, num_pages):
+def extract_lines(file_path, num_pages, skip_footnotes=True):
     """Reads the PDF page by page, returning only Line records so memory stays small for big PDFs."""
     from pdfminer.high_level import extract_pages
     from pdfminer.layout import LAParams, LTChar, LTTextContainer, LTTextLineHorizontal
@@ -157,9 +157,10 @@ def extract_lines(file_path, num_pages):
                 if not chars:
                     continue
                 size = median(c.size for c in chars)
-                # Drop superscript footnote markers: digits much smaller than the rest of the line
+                # Drop superscript footnote markers: digits and note symbols much smaller than the rest of the line
                 text = ''.join(c.get_text() for c in line
-                               if not (isinstance(c, LTChar) and c.size < 0.7 * size and c.get_text().isdigit()))
+                               if not (skip_footnotes and isinstance(c, LTChar) and c.size < 0.7 * size
+                                       and (c.get_text().isdigit() or c.get_text() in '*†‡§¶')))
                 text = re.sub(r'\s+', ' ', text).strip()
                 if not text:
                     continue
@@ -203,7 +204,7 @@ def left_margins(page_lines):
 TERMINAL = ('.', '!', '?', ':', '”', '"', '’', "'", ')', ']', '—', '…')
 
 
-def build_paragraphs(lines, body_size):
+def build_paragraphs(lines, body_size, skip_footnotes=True):
     paragraphs = []
     current, current_page, current_heading = [], 0, False
 
@@ -226,8 +227,8 @@ def build_paragraphs(lines, body_size):
         right_edge = max(l.x1 for l in page_lines)
         for l in page_lines:
             is_heading = l.size >= body_size * 1.2 and len(l.text) < 120
-            if l.size < body_size * 0.8 and not is_heading:
-                continue  # footnotes, captions
+            if skip_footnotes and l.size < body_size * 0.8 and not is_heading:
+                continue  # footnotes (and captions), set smaller than the body text
             margin = max([m for m in margins if m <= l.x0 + 2] or [margins[0]])
             indented = 3 < l.x0 - margin < 60
             if prev is None:

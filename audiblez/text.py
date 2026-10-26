@@ -62,26 +62,103 @@ ABBREVIATIONS = [
     (r'\bMrs\.(?=\s)', 'Missus'), (r'\bMr\.(?=\s)', 'Mister'), (r'\bMessrs\.(?=\s)', 'Messieurs'),
     (r'\bMs\.(?=\s+[A-Z])', 'Miz'), (r'\bDr\.(?=\s+[A-Z])', 'Doctor'), (r'\bSt\.(?=\s+[A-Z])', 'Saint'),
     (r'\bRev\.(?=\s+[A-Z])', 'Reverend'), (r'\bCapt\.(?=\s+[A-Z])', 'Captain'), (r'\bCol\.(?=\s+[A-Z])', 'Colonel'),
-    (r'\bProf\.(?=\s+[A-Z])', 'Professor'), (r'\bMt\.(?=\s+[A-Z])', 'Mount'), (r'&c\.', 'et cetera.'), (r'&c\b', 'et cetera'),
+    (r'\bProf\.(?=\s+[A-Z])', 'Professor'), (r'\b([Cc])hap\.(?=\s+\d)', r'\1hapter'), (r'\b([Vv])ol\.(?=\s+\d)', r'\1olume'), (r'\bMt\.(?=\s+[A-Z])', 'Mount'), (r'&c\.', 'et cetera.'), (r'&c\b', 'et cetera'),
 ]
 ARCHAIC = re.compile(r'\b([Tt])o-(morrow|day|night)\b')  # to-morrow, to-day, to-night (old spellings)
-NUMBERED = re.compile(r'\b(Chapter|Book|Part|Volume|Act|Scene|Canto|Letter|Section|Sermon|Psalm)\s+([IVXLC]+)\b(?![\'’]\w)')
-ROMAN = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100}
+PAGE_MARKER = re.compile(r'\s*\{(?:[ivxlcdm]+|\d+)\}')  # page numbers of the printed edition, e.g. {xii} in Gutenberg texts
+
+# Roman numerals are read letter by letter ("III" as "I I I") by TTS models, but "I" is usually the pronoun and words
+# like MIX, DID or CD are spelled with numeral letters, so numerals are only converted where context makes them certain.
+ROMAN_VALUES = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
+CANONICAL_ROMAN = re.compile(r'^M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$', re.I)
+NUMERAL = r'[IVXLCDM]+|[ivxlcdm]+'
+HEADING_WORDS = (r'chapter|chap\.|book|part|volume|vol\.|act|scene|canto|letter|section|sect\.|sermon|psalm|ps\.|'
+                 r'appendix|lecture|lesson|article|art\.|stave|epistle|homily|discourse|no\.|number|page|p\.|pp\.')
+AFTER_HEADING = re.compile(rf'\b({HEADING_WORDS})(\s+)({NUMERAL})\b(?![\'’]\w)', re.I)
+VERSE = re.compile(r'(\d+|' + NUMERAL + r')([.,]?)\s+v\.\s*(\d+)')  # chap. lxiii, v. 10 -> chapter 63, verse 10
+CITATION = re.compile(rf'\b([A-Z][a-z]{{1,12}}\.?)\s+({NUMERAL})[.:]\s*(\d+)')  # 1 Cor. xii.12 -> 1 Cor. 12:12
+SECTION = re.compile(rf'(^|(?<=[.!?”"’]\s))([IVXL]+)([.,])(?=\s*[A-Z“"‘])')  # "II. Now secondly" at a paragraph or sentence start
+LIST = re.compile(rf'\b({NUMERAL})\.(?=,\s*(?:{NUMERAL})\.)|(?<=\.,\s)({NUMERAL})\.')  # contents: "XII., XIII., XIV."
+REGNAL_NAMES = ('Alexander|Alfonso|Anne|Benedict|Boniface|Catherine|Charles|Christian|Clement|Constantine|David|'
+                'Edward|Elizabeth|Ferdinand|Francis|Frederick|George|Gregory|Gustav|Gustavus|Henry|Innocent|James|'
+                'John|Joseph|Leo|Leopold|Louis|Ludwig|Mary|Napoleon|Nicholas|Paul|Peter|Philip|Pius|Ptolemy|'
+                'Ramesses|Richard|Robert|Rudolf|Sixtus|Stephen|Urban|Victor|Wilhelm|William')
+# a lone I after a name is usually the pronoun ("Elizabeth I went home" is ambiguous), so it needs a clear sign
+REGNAL = re.compile(rf'\b({REGNAL_NAMES})\s+((?!I\b)[IVX]+|I(?=\s*(?:[.,;:)]|of\b|and\b|$)))\b(?![\'’]\w)')
+NAMED = re.compile(r'\b([A-Z][a-z]+)\s+((?:X{0,3})(?:IX|IV|V?I{1,3})|X{1,3}|V)\b(?![\'’]\w)')  # World War II, Apollo XI
+NOT_NUMERALS = {'I', 'MI', 'CD', 'DC', 'CM', 'MD', 'DM', 'MIX', 'DIM', 'DID', 'MID', 'LID', 'MIL', 'ILL', 'CIVIL',
+                'VIVID', 'LIVID', 'MIMIC', 'DISC', 'CLI', 'DIV', 'XXX'}
+# Abbreviated Bible books in citations ("1 Cor. 12:12", "Isa. 53:5"), only expanded when a chapter number follows,
+# so "Rev. Smith" stays Reverend and "Col. Brandon" Colonel
+BIBLE_BOOKS = {
+    'Gen': 'Genesis', 'Ex': 'Exodus', 'Exod': 'Exodus', 'Lev': 'Leviticus', 'Num': 'Numbers', 'Deut': 'Deuteronomy',
+    'Josh': 'Joshua', 'Judg': 'Judges', 'Sam': 'Samuel', 'Kgs': 'Kings', 'Chron': 'Chronicles', 'Neh': 'Nehemiah',
+    'Esth': 'Esther', 'Ps': 'Psalm', 'Psa': 'Psalm', 'Prov': 'Proverbs', 'Eccl': 'Ecclesiastes', 'Eccles': 'Ecclesiastes',
+    'Isa': 'Isaiah', 'Jer': 'Jeremiah', 'Lam': 'Lamentations', 'Ezek': 'Ezekiel', 'Dan': 'Daniel', 'Hos': 'Hosea',
+    'Obad': 'Obadiah', 'Mic': 'Micah', 'Nah': 'Nahum', 'Hab': 'Habakkuk', 'Zeph': 'Zephaniah', 'Hag': 'Haggai',
+    'Zech': 'Zechariah', 'Mal': 'Malachi', 'Matt': 'Matthew', 'Mk': 'Mark', 'Lk': 'Luke', 'Jn': 'John', 'Rom': 'Romans',
+    'Cor': 'Corinthians', 'Gal': 'Galatians', 'Eph': 'Ephesians', 'Phil': 'Philippians', 'Col': 'Colossians',
+    'Thess': 'Thessalonians', 'Tim': 'Timothy', 'Tit': 'Titus', 'Philem': 'Philemon', 'Heb': 'Hebrews', 'Jas': 'James',
+    'Pet': 'Peter', 'Rev': 'Revelation'}
+NUMBERED_BOOKS = 'Samuel|Kings|Chronicles|Corinthians|Thessalonians|Timothy|Peter|John'
+BIBLE_ABBREVIATION = re.compile(r'(?:\b([123])\s+)?\b(' + '|'.join(sorted(BIBLE_BOOKS, key=len, reverse=True)) + r')\.\s*(?=\d)')
+BIBLE_NUMBERED = re.compile(rf'\b([123])\s+({NUMBERED_BOOKS})\b(?=\s+\d)')
+BIBLE_VERSE = re.compile(r'\b(' + '|'.join(sorted(set(BIBLE_BOOKS.values()))) + r')\s+(\d+)\.\s*(\d+)\b')  # Psalm 23. 1 -> Psalm 23:1
+ORDINALS = ['', 'First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth', 'Eleventh',
+            'Twelfth', 'Thirteenth', 'Fourteenth', 'Fifteenth', 'Sixteenth', 'Seventeenth', 'Eighteenth', 'Nineteenth',
+            'Twentieth']
 
 
 def roman_to_int(numeral):
+    """The value of a canonical Roman numeral (any case), or None."""
+    if not numeral or not CANONICAL_ROMAN.match(numeral):
+        return None
+    numeral = numeral.upper()
     total = 0
     for i, ch in enumerate(numeral):
-        value = ROMAN[ch]
-        total += -value if i + 1 < len(numeral) and ROMAN[numeral[i + 1]] > value else value
+        value = ROMAN_VALUES[ch]
+        total += -value if i + 1 < len(numeral) and ROMAN_VALUES[numeral[i + 1]] > value else value
     return total
 
 
-def normalize_for_speech(text):
+def roman_numerals_to_numbers(text):
+    def number(numeral, fallback):
+        value = roman_to_int(numeral)
+        return str(value) if value else fallback
+
+    def after_heading(m):
+        word, space, numeral = m.group(1), m.group(2), m.group(3)
+        if len(numeral) == 1:  # "the book I love", "for the most part I can": a lone letter needs a clear heading
+            heading = word[:1].isupper() or word.endswith('.')
+            followed = re.match(r'\s*(?:[.,;:)\]]|$)', text[m.end():])
+            if not (heading and followed):
+                return m.group(0)
+        return word + space + number(numeral, numeral)
+
+    text = AFTER_HEADING.sub(after_heading, text)
+    text = VERSE.sub(lambda m: f'{number(m.group(1), m.group(1))}, verse {m.group(3)}', text)
+    text = CITATION.sub(lambda m: f'{m.group(1)} {m.group(2)}:{m.group(3)}' if roman_to_int(m.group(2)) is None
+                        else f'{m.group(1)} {roman_to_int(m.group(2))}:{m.group(3)}', text)
+    text = SECTION.sub(lambda m: m.group(1) + number(m.group(2), m.group(2)) + m.group(3)
+                       if m.group(2) not in NOT_NUMERALS - {'I'} else m.group(0), text)
+    text = LIST.sub(lambda m: number(m.group(1) or m.group(2), m.group(1) or m.group(2)) + '.', text)
+    text = REGNAL.sub(lambda m: f'{m.group(1)} the {ORDINALS[roman_to_int(m.group(2))]}'
+                      if (roman_to_int(m.group(2)) or 99) <= 20 else m.group(0), text)
+    text = NAMED.sub(lambda m: m.group(0) if m.group(2) in NOT_NUMERALS or m.group(1) in ('I', 'A')
+                     else f'{m.group(1)} {roman_to_int(m.group(2))}', text)
+    return text
+
+
+def normalize_for_speech(text, roman_numerals=True):
+    text = PAGE_MARKER.sub('', text)
+    if roman_numerals:
+        text = roman_numerals_to_numbers(text)  # before abbreviations: "chap.", "Ps." and "St." are context here
+    text = BIBLE_ABBREVIATION.sub(lambda m: (ORDINALS[int(m.group(1))] + ' ' if m.group(1) else '') + BIBLE_BOOKS[m.group(2)] + ' ', text)
+    text = BIBLE_NUMBERED.sub(lambda m: f'{ORDINALS[int(m.group(1))]} {m.group(2)}', text)
+    text = BIBLE_VERSE.sub(r'\1 \2:\3', text)
     for pattern, replacement in ABBREVIATIONS:
         text = re.sub(pattern, replacement, text)
-    text = ARCHAIC.sub(lambda m: m.group(1) + 'o' + m.group(2), text)
-    return NUMBERED.sub(lambda m: f'{m.group(1)} {roman_to_int(m.group(2))}', text)
+    return ARCHAIC.sub(lambda m: m.group(1) + 'o' + m.group(2), text)
 
 
 def split_sentences(paragraph):
@@ -127,8 +204,8 @@ def pack_sentences(sentences, max_chars):
     return chunks
 
 
-def chunk_paragraph(paragraph, voice, max_chars):
-    paragraph = normalize_for_speech(paragraph)
+def chunk_paragraph(paragraph, voice, max_chars, roman_numerals=True):
+    paragraph = normalize_for_speech(paragraph, roman_numerals)
     if len(paragraph) <= max_chars:
         pieces = [paragraph]
     else:
@@ -139,6 +216,6 @@ def chunk_paragraph(paragraph, voice, max_chars):
     return chunks
 
 
-def chunk_text(text, voice, max_chars):
+def chunk_text(text, voice, max_chars, roman_numerals=True):
     """Chunks for narrating text in a single voice."""
-    return [c for p in split_paragraphs(text) for c in chunk_paragraph(p, voice, max_chars)]
+    return [c for p in split_paragraphs(text) for c in chunk_paragraph(p, voice, max_chars, roman_numerals)]

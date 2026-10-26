@@ -25,6 +25,8 @@ def cli_main():
     parser.add_argument('-c', '--cuda', default=False, help=f'Use GPU via Cuda in Torch if available', action='store_true')
     parser.add_argument('-o', '--output', default='.', help='Output folder for the audiobook and temporary files', metavar='FOLDER')
     parser.add_argument('--no-verify', action='store_true', help='Skip checking each clip with speech recognition (used when faster-whisper is installed: pip install "audiblez[verify]")')
+    parser.add_argument('--skip-footnotes', action=argparse.BooleanOptionalAction, default=None, help='Don\'t read footnotes, endnotes and their reference markers (default: on; [text] skip_footnotes in the config)')
+    parser.add_argument('--roman-numerals', action=argparse.BooleanOptionalAction, default=None, help='Read Roman numerals as numbers where context makes them certain: CHAPTER XII, "II. Secondly", Charles II, chap. lxiii (default: on; [text] roman_numerals in the config)')
     parser.add_argument('--max-chapters', type=int, default=None, metavar='N', help='Only read the first N selected chapters (handy for a quick test)')
 
     tts = parser.add_argument_group('TTS provider')
@@ -112,7 +114,9 @@ def cli_main():
     main(args.file_path, voice, args.pick, speed, args.output, max_chapters=args.max_chapters, engine=engine,
          characters=args.characters, llm=llm, review=not args.no_review, auto_narrator=args.auto_narrator and args.voice is None,
          prime_replies=args.prime_replies if args.prime_replies is not None else bool(cfg['characters'].get('prime_replies')),
-         verifier=verifier, llm_casting=bool(cfg['characters'].get('llm_casting', True)))
+         verifier=verifier, llm_casting=bool(cfg['characters'].get('llm_casting', True)),
+         skip_footnotes=args.skip_footnotes if args.skip_footnotes is not None else bool(cfg['text'].get('skip_footnotes', True)),
+         roman_numerals=args.roman_numerals if args.roman_numerals is not None else bool(cfg['text'].get('roman_numerals', True)))
 
 
 def print_voices(engine):

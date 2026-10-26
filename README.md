@@ -124,7 +124,19 @@ and prints it as `expressiveness` for the config.
 ## Speech clean-up and verification
 
 Before speech, abbreviations that TTS models misread are spelled out (Mr., Mrs., Dr., St., &c.), old spellings
-are modernized (to-morrow, to-day) and Roman numerals after Chapter/Book/Part become numbers. Every clip is trimmed
+are modernized (to-morrow, to-day), and page numbers of the printed edition (`{xii}` in Gutenberg texts) are dropped.
+
+Two more clean-ups are on by default and can be turned off in the `[text]` section of the config, or for one book
+on the command line, if they don't suit it:
+
+- **Footnotes are skipped** (`--no-skip-footnotes` to read them): footnote and endnote bodies and the reference
+  markers in the text ("objected¹", "[3]", "*"), recognized from standard EPUB markup, Project Gutenberg's markup and
+  common class names. In PDFs, small-print lines and superscript markers are dropped.
+- **Roman numerals are read as numbers** (`--no-roman-numerals` to keep them): TTS models read "III" as "I I I", so
+  numerals are converted where the context makes them certain: after headings ("CHAPTER XII", "Book IV", "Scene
+  ii"), as section numbers at the start of a paragraph ("II. Secondly…"), after monarchs' names ("Charles II" as
+  "Charles the Second"), in lists, and in citations ("Isaiah, chap. lxiii, v. 10" as "chapter 63, verse 10";
+  "1 Cor. xii. 12" as "First Corinthians 12:12"). The pronoun I and words like MIX or CIVIL are left alone. Every clip is trimmed
 of the silence models pad it with, levelled to the same loudness, and regenerated if it has a long silence in the
 middle or a length that doesn't fit its text.
 
@@ -250,10 +262,11 @@ To do so, you can use `--pick` to interactively choose the chapters to convert (
 For all the options available, you can check the help page `audiblez --help`:
 
 ```
-usage: audiblez [-h] [-v VOICE] [-p] [-s SPEED] [-c] [-o FOLDER] [--no-verify] [--max-chapters N]
-                [--provider PROVIDER] [--model MODEL] [--base-url URL] [--list-voices]
-                [--config FILE] [--init-config] [--profile-voices] [--update-config]
-                [--audition-voices] [--characters] [--no-review]
+usage: audiblez [-h] [-v VOICE] [-p] [-s SPEED] [-c] [-o FOLDER] [--no-verify]
+                [--skip-footnotes | --no-skip-footnotes] [--roman-numerals | --no-roman-numerals]
+                [--max-chapters N] [--provider PROVIDER] [--model MODEL] [--base-url URL]
+                [--list-voices] [--config FILE] [--init-config] [--profile-voices]
+                [--update-config] [--audition-voices] [--characters] [--no-review]
                 [--prime-replies | --no-prime-replies] [--auto-narrator]
                 [--llm-provider LLM_PROVIDER] [--llm-model LLM_MODEL]
                 [file_path]
@@ -274,6 +287,13 @@ options:
                         Output folder for the audiobook and temporary files
   --no-verify           Skip checking each clip with speech recognition (used when faster-whisper
                         is installed: pip install "audiblez[verify]")
+  --skip-footnotes, --no-skip-footnotes
+                        Don't read footnotes, endnotes and their reference markers (default: on;
+                        [text] skip_footnotes in the config)
+  --roman-numerals, --no-roman-numerals
+                        Read Roman numerals as numbers where context makes them certain: CHAPTER
+                        XII, "II. Secondly", Charles II, chap. lxiii (default: on; [text]
+                        roman_numerals in the config)
   --max-chapters N      Only read the first N selected chapters (handy for a quick test)
 
 TTS provider:

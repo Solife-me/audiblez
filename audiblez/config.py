@@ -13,6 +13,7 @@ DEFAULTS = {
     'tts': {'provider': 'kokoro', 'voice': 'af_sky', 'speed': 1.0},
     'llm': {'provider': None, 'model': None},
     'characters': {'prime_replies': True, 'llm_casting': True},
+    'text': {'skip_footnotes': True, 'roman_numerals': True},
     'providers': {'kokoro': {'type': 'kokoro'}},
 }
 
@@ -32,6 +33,11 @@ speed = 1.0
 [llm]
 provider = "ollama"
 model = "gemma4:26b-mlx"
+
+# How the book's text is prepared for reading. Both can be turned off for a single book on the command line.
+[text]
+skip_footnotes = true      # don't read footnotes/endnotes or their reference markers (--no-skip-footnotes)
+roman_numerals = true      # read "CHAPTER XII" and "II. Secondly" as numbers (--no-roman-numerals)
 
 [providers.kokoro]
 type = "kokoro"

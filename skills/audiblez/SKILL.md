@@ -57,6 +57,8 @@ user's Ollama Mac, roughly 50x faster than real time), or by Kokoro running loca
 | Character voices: synthesize | run the same `--characters` command again |
 | Character voices in one go | `audiblez BOOK -o OUT --characters --no-review` |
 | Faster, without checking each clip | add `--no-verify` |
+| Read footnotes too (they're skipped by default) | add `--no-skip-footnotes` |
+| Keep Roman numerals as written (converted by default) | add `--no-roman-numerals` |
 | Use a cloud LLM for this run | add `--llm-model kimi-k3:cloud` |
 | Audition every voice | `audiblez --audition-voices -o OUT` |
 
@@ -118,6 +120,10 @@ Changing voices on the cast sheet never re-runs speaker detection; only the audi
 - **Clip verification**: every clip is checked with a small speech recognizer (installed by the install script),
   and clips where the TTS model dropped or invented words are regenerated. Lines like `TTS glitch (...)
   regenerating` in the log are this working, not an error. It roughly doubles the run time; `--no-verify` skips it.
+- **Footnotes and Roman numerals**: footnotes are skipped and Roman numerals read as numbers by default. If the user
+  hears a footnote read aloud, a numeral spelled out, or a word wrongly read as a number in a particular book, re-run
+  that book with `--no-skip-footnotes` or `--no-roman-numerals` (or report the case so the rules can be fixed).
+  Changing either setting regenerates the audio rather than reusing chapters made with the other setting.
 - **Speed**: phonon only speaks at 1.0. Other speeds are applied when the m4b is made, which works fine.
 - **Wrong chapters picked**: the log prints a table of all sections with ✅ on the selected ones. PDFs use their
   bookmarks, or larger-font headings when there are none. Front matter (cover, contents) is skipped. Long

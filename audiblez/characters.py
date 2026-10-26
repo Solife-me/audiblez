@@ -513,7 +513,7 @@ class Cast:
         items = sorted((c.name, c.voice) for c in self.registry.characters.values())
         return hashlib.sha1(json.dumps([self.narrator_voice, items]).encode()).hexdigest()[:8]
 
-    def chunks(self, text, max_chars, prime_replies=False):
+    def chunks(self, text, max_chars, prime_replies=False, roman_numerals=True):
         """Chunks for one chapter: narration in the narrator's voice, each quote in its speaker's voice.
 
         Quotes of one speaker split by a short dialogue tag ("“My dear,” said she, “have you heard?”") are
@@ -537,7 +537,8 @@ class Cast:
                     voiced[-1][2] = voiced[-1][2] or s.is_quote
                 else:
                     voiced.append([voice, s.text, s.is_quote])
-            voiced = [(v, normalize_for_speech(t.strip()), q) for v, t, q in voiced if re.search(r'\w', t)]  # drop stray punctuation
+            voiced = [(v, normalize_for_speech(t.strip(), roman_numerals), q) for v, t, q in voiced
+                      if re.search(r'\w', t)]  # drop stray punctuation
             has_dialogue = any(q for _, _, q in voiced)
 
             # Group each speaker's quotes that are separated only by a short narrator tag

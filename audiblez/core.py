@@ -69,7 +69,7 @@ def set_espeak_library():
 def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.',
          max_chapters=None, max_sentences=None, selected_chapters=None, post_event=None, engine=None,
          characters=False, llm=None, review=True, auto_narrator=False, prime_replies=False, verifier=None,
-         llm_casting=True):
+         llm_casting=True, skip_footnotes=True, roman_numerals=True):
     if post_event: post_event('CORE_STARTED')
     load_spacy()
     if output_folder != '.':
@@ -81,7 +81,7 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
     speed = speed or 1.0
     engine.check_voice(voice)
 
-    book = load_book(file_path)
+    book = load_book(file_path, skip_footnotes=skip_footnotes)
     title, creator, document_chapters = book.title, book.creator, book.chapters
 
     if not selected_chapters:
@@ -133,6 +133,7 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
     for i, chapter in enumerate(selected_chapters, start=1):
         text = chapter.extracted_text
         voice_tag = slug(voice) + (f'_cast{cast.signature()}{"p" if prime_replies else ""}' if cast else '')
+        voice_tag += ('_withnotes' if not skip_footnotes else '') + ('_roman' if not roman_numerals else '')
         chapter_wav_path = Path(output_folder) / f'{stem}_chapter_{i}_{voice_tag}_{slug(chapter.get_name())}.wav'
         if Path(chapter_wav_path).exists():
             print(f'File for chapter {i} already exists. Skipping')
@@ -149,10 +150,10 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
         start_time = time.time()
         if post_event: post_event('CORE_CHAPTER_STARTED', chapter_index=chapter.chapter_index)
         if cast:
-            chunks = (chunk_text(intro, voice, engine.max_chars)
-                      + cast.chunks(chapter.extracted_text, engine.max_chars, prime_replies=prime_replies))
+            chunks = (chunk_text(intro, voice, engine.max_chars, roman_numerals)
+                      + cast.chunks(chapter.extracted_text, engine.max_chars, prime_replies, roman_numerals))
         else:
-            chunks = chunk_text(f'{intro}\n\n{text}' if intro else text, voice, engine.max_chars)
+            chunks = chunk_text(f'{intro}\n\n{text}' if intro else text, voice, engine.max_chars, roman_numerals)
         if synthesize_chunks(engine, chunks, speed, chapter_wav_path, stats, post_event=post_event, max_chunks=max_sentences,
                              verifier=verifier):
             chapter_wav_files.append(chapter_wav_path)
@@ -179,18 +180,18 @@ def chapter_title(chapter, i):
     return getattr(chapter, 'title', None) or f'Chapter {i}'
 
 
-def load_book(file_path):
+def load_book(file_path, skip_footnotes=True):
     """Returns a SimpleNamespace(title, creator, cover_image, chapters, good_chapters) for an epub or pdf."""
     if Path(file_path).suffix.lower() == '.pdf':
         from audiblez.pdf import load_pdf
-        return load_pdf(file_path)
+        return load_pdf(file_path, skip_footnotes=skip_footnotes)
     book = epub.read_epub(file_path)
     meta_title = book.get_metadata('DC', 'title')
     meta_creator = book.get_metadata('DC', 'creator')
     cover_maybe = find_cover(book)
     if cover_maybe:
         print(f'Found cover image {cover_maybe.file_name} in {cover_maybe.media_type} format')
-    document_chapters = find_document_chapters_and_extract_texts(book)
+    document_chapters = find_document_chapters_and_extract_texts(book, skip_footnotes=skip_footnotes)
     return SimpleNamespace(
         title=meta_title[0][0] if meta_title else '',
         creator=meta_creator[0][0] if meta_creator else '',
@@ -347,7 +348,41 @@ def gen_text(text, voice='af_heart', output_file='text.wav', speed=1, play=False
         subprocess.run(['ffplay', '-autoexit', '-nodisp', output_file])
 
 
-def find_document_chapters_and_extract_texts(book):
+FOOTNOTE_TYPES = re.compile(r'\b(footnotes?|endnotes?|rearnotes?|notes?)\b')
+FOOTNOTE_ROLES = {'doc-footnote', 'doc-endnote', 'doc-endnotes', 'doc-footnotes'}
+FOOTNOTE_CLASS = re.compile(r'^(foot|fn|fnote|ftn)$|footnote|endnote', re.I)
+NOTE_LINK = re.compile(r'note|fn|ftn|foot', re.I)
+MARKER_TEXT = re.compile(r'^[\[(]?\s*(\d{1,4}[a-z]?|[a-z]|[*†‡§¶]+)\s*[\])]?$', re.I)
+
+
+def strip_footnotes(soup):
+    """Removes footnote/endnote bodies and the reference markers in the text (which would be read as "twelve")."""
+    def is_note(el):
+        types = el.get('epub:type', '') or ''
+        classes = el.get('class') or []
+        return ((FOOTNOTE_TYPES.search(types) and 'noteref' not in types) or el.get('role') in FOOTNOTE_ROLES
+                or any(FOOTNOTE_CLASS.search(c) for c in classes))
+
+    def is_marker(el):
+        text = el.get_text(strip=True)
+        if not MARKER_TEXT.match(text or '-'):
+            return False
+        if el.name == 'a':
+            return ('noteref' in (el.get('epub:type', '') or '') or el.get('role') == 'doc-noteref'
+                    or bool(NOTE_LINK.search((el.get('href') or '') + ' ' + (el.get('id') or ''))))
+        return el.name == 'sup' and (el.find('a') is not None or not text.isalpha())  # not the "th" of 19<sup>th</sup>
+
+    for el in soup.find_all(is_note):
+        el.decompose()
+    for el in soup.find_all(['a', 'sup']):
+        if not el.decomposed and is_marker(el):
+            parent = el.parent
+            el.decompose()
+            if parent is not None and parent.name == 'sup' and not parent.get_text(strip=True):
+                parent.decompose()
+
+
+def find_document_chapters_and_extract_texts(book, skip_footnotes=True):
     """Returns every chapter that is an ITEM_DOCUMENT and enriches each chapter with extracted_text."""
     document_chapters = []
     for chapter in book.get_items():
@@ -355,10 +390,13 @@ def find_document_chapters_and_extract_texts(book):
             continue
         xml = chapter.get_body_content()
         soup = BeautifulSoup(xml, features='lxml')
+        if skip_footnotes:
+            strip_footnotes(soup)
         chapter.extracted_text = ''
         html_content_tags = ['title', 'p', 'h1', 'h2', 'h3', 'h4', 'li']
         for text in [c.text.strip() for c in soup.find_all(html_content_tags) if c.text]:
             text = re.sub(r'\s+', ' ', text)  # line breaks inside a paragraph are just source formatting
+            text = re.sub(r'\s*\[\s*\]|\(\s*\)', '', text).strip()  # brackets left around removed note markers
             if not text:
                 continue
             if not re.search(r'[.!?…:;”"’)\]]$', text):
