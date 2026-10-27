@@ -28,6 +28,7 @@ def cli_main():
     parser.add_argument('--skip-footnotes', action=argparse.BooleanOptionalAction, default=None, help='Don\'t read footnotes, endnotes and their reference markers (default: on; [text] skip_footnotes in the config)')
     parser.add_argument('--roman-numerals', action=argparse.BooleanOptionalAction, default=None, help='Read Roman numerals as numbers where context makes them certain: CHAPTER XII, "II. Secondly", Charles II, chap. lxiii (default: on; [text] roman_numerals in the config)')
     parser.add_argument('--foreign-scripts', choices=['transliterate', 'skip', 'read'], default=None, help='Greek and Hebrew quotations, which no TTS voice can read: transliterate them into English letters ("tremontas kai phoboumenous"), skip them, or read them as written (default: transliterate; [text] foreign_scripts in the config)')
+    parser.add_argument('--article', action='store_true', help='Read only an article\'s title, author, date and body, skipping ads, menus, cookie notices, links, captions and references (for PDFs of web pages; uses the [llm] if configured)')
     parser.add_argument('--max-chapters', type=int, default=None, metavar='N', help='Only read the first N selected chapters (handy for a quick test)')
 
     tts = parser.add_argument_group('TTS provider')
@@ -103,10 +104,14 @@ def cli_main():
             print('CUDA GPU not available. Defaulting to CPU')
 
     llm = None
-    if args.characters or args.auto_narrator:
+    if args.characters or args.auto_narrator or args.article:
         from audiblez.llm import create_llm
-        llm = create_llm(cfg, provider=args.llm_provider, model=args.llm_model)
-        print(f'Using LLM {llm.model} at {llm.base_url}')
+        try:
+            llm = create_llm(cfg, provider=args.llm_provider, model=args.llm_model)
+            print(f'Using LLM {llm.model} at {llm.base_url}')
+        except ValueError:
+            if not args.article:
+                raise
 
     from audiblez.verify import create_verifier
     verifier = None if args.no_verify else create_verifier(cfg)
@@ -118,7 +123,7 @@ def cli_main():
          verifier=verifier, llm_casting=bool(cfg['characters'].get('llm_casting', True)),
          skip_footnotes=args.skip_footnotes if args.skip_footnotes is not None else bool(cfg['text'].get('skip_footnotes', True)),
          roman_numerals=args.roman_numerals if args.roman_numerals is not None else bool(cfg['text'].get('roman_numerals', True)),
-         foreign_scripts=args.foreign_scripts or cfg['text'].get('foreign_scripts', 'transliterate'))
+         foreign_scripts=args.foreign_scripts or cfg['text'].get('foreign_scripts', 'transliterate'), article=args.article)
 
 
 def print_voices(engine):

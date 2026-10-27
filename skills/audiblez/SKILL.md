@@ -61,6 +61,7 @@ user's Ollama Mac, roughly 50x faster than real time), or by Kokoro running loca
 | Keep Roman numerals as written (converted by default) | add `--no-roman-numerals` |
 | Leave out Greek/Hebrew quotations (transliterated by default) | add `--foreign-scripts skip` |
 | Use a cloud LLM for this run | add `--llm-model kimi-k3:cloud` |
+| Article or web page saved as PDF: only title, author, date and body | `audiblez ARTICLE.pdf -o OUT --article` |
 | Audition every voice | `audiblez --audition-voices -o OUT` |
 
 `BOOK` is the path to the `.epub` or `.pdf`; `OUT` is a folder for this book, e.g. `{audiblez.output_dir}/<book name>`.
@@ -79,6 +80,8 @@ The result is `OUT/<stem>.m4b`, where `<stem>` is the book's file name without t
    - Sermons, essays, classics by a known author: suggest `--auto-narrator`. It only switches voice when it is
      confident and a voice with the matching gender and accent is tagged in the config.
    - Don't use `--characters` on non-fiction: quotations there are mostly citations, not dialogue.
+   - A news story, blog post, web page saved as PDF or other single article: use `--article`, which skips menus,
+     ads, cookie notices, links, captions and reference lists, and opens with its title, author and date.
 4. **Run it in the background**: a full book takes from minutes (phonon) to hours (Kokoro on CPU). Use a log:
    `mkdir -p OUT && nohup audiblez BOOK -o OUT [options] > OUT/audiblez.log 2>&1 &`
    Report progress from `tail -n 3 OUT/audiblez.log` (it prints `Progress: NN%` and an ETA) when the user asks.

@@ -69,7 +69,7 @@ def set_espeak_library():
 def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.',
          max_chapters=None, max_sentences=None, selected_chapters=None, post_event=None, engine=None,
          characters=False, llm=None, review=True, auto_narrator=False, prime_replies=False, verifier=None,
-         llm_casting=True, skip_footnotes=True, roman_numerals=True, foreign_scripts='transliterate'):
+         llm_casting=True, skip_footnotes=True, roman_numerals=True, foreign_scripts='transliterate', article=False):
     if post_event: post_event('CORE_STARTED')
     load_spacy()
     if output_folder != '.':
@@ -82,6 +82,11 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
     engine.check_voice(voice)
 
     book = load_book(file_path, skip_footnotes=skip_footnotes)
+    if article:
+        from audiblez.article import clean_article
+        if llm is None:
+            print('Article mode without an LLM: only the rules remove boilerplate. Configure [llm] for much better results.')
+        book = clean_article(book, llm)
     title, creator, document_chapters = book.title, book.creator, book.chapters
 
     if not selected_chapters:
@@ -151,7 +156,7 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
         if len(text.strip()) < 10:
             print(f'Skipping empty chapter {i}')
             continue
-        intro = f'{title} – {creator}.' if i == 1 else ''  # add intro text
+        intro = f'{title} – {creator}.' if i == 1 and not getattr(book, 'intro_included', False) else ''  # add intro text
         start_time = time.time()
         if post_event: post_event('CORE_CHAPTER_STARTED', chapter_index=chapter.chapter_index)
         if cast:

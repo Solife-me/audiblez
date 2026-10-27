@@ -57,6 +57,17 @@ Long sections are split into parts of at most ~40 minutes, always between two pa
 mid-sentence. Audio is written to disk as it's generated, so memory use stays flat however long the book is.
 Only PDFs with a text layer are supported (no OCR for scanned pages).
 
+### Articles
+
+`audiblez article.pdf --article` reads only an article's title, author, date and body, which is useful for web
+pages saved as PDF. URLs, ISBNs and plainly boilerplate paragraphs are always removed: cookie and consent notices,
+subscribe and sign-in prompts, ads, share and follow buttons, image credits, "read more" and related-story lists,
+copyright lines. With an LLM configured (`[llm]`), the LLM then picks the article out of what's left, with
+a second look at the paragraphs at either edge, since an article's closing paragraph is the easiest to lose. The
+audiobook opens with "Title. By author. Date." On a BBC article saved as PDF, 99% of what's read is the article
+(88% without `--article`), with the closing paragraph kept. On a Wikipedia page, 94%, instead of 55%, when every
+reference and link was read. Without an LLM, only the rules apply.
+
 ## Other TTS providers (Ollama and OpenAI-compatible servers)
 
 Besides the built-in Kokoro, audiblez can use any server that implements the OpenAI `/v1/audio/speech` API,
@@ -273,7 +284,7 @@ For all the options available, you can check the help page `audiblez --help`:
 ```
 usage: audiblez [-h] [-v VOICE] [-p] [-s SPEED] [-c] [-o FOLDER] [--no-verify]
                 [--skip-footnotes | --no-skip-footnotes] [--roman-numerals | --no-roman-numerals]
-                [--foreign-scripts {transliterate,skip,read}] [--max-chapters N]
+                [--foreign-scripts {transliterate,skip,read}] [--article] [--max-chapters N]
                 [--provider PROVIDER] [--model MODEL] [--base-url URL] [--list-voices]
                 [--config FILE] [--init-config] [--profile-voices] [--update-config]
                 [--audition-voices] [--characters] [--no-review]
@@ -309,6 +320,9 @@ options:
                         them into English letters ("tremontas kai phoboumenous"), skip them, or
                         read them as written (default: transliterate; [text] foreign_scripts in
                         the config)
+  --article             Read only an article's title, author, date and body, skipping ads, menus,
+                        cookie notices, links, captions and references (for PDFs of web pages;
+                        uses the [llm] if configured)
   --max-chapters N      Only read the first N selected chapters (handy for a quick test)
 
 TTS provider:
